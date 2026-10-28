@@ -1,0 +1,57 @@
+# mtls-ca の設定例 / Example configuration for mtls-ca
+#
+# このファイルを /etc/mtls-ca/config.yaml などリポジトリの外へコピーして編集する。
+# 秘密情報（鍵の中身）は書かず、ファイルのパスで指す。
+# Copy this file outside the repository (e.g. /etc/mtls-ca/config.yaml) and edit it.
+# Do not put secrets here; refer to key files by path.
+
+# 待ち受けアドレス / Listen address
+listen: ":8443"
+
+# クライアントから見た CA の URL（https://ホスト[:ポート]） / CA URL as seen by clients
+external_url: "https://ca.internal.example.com:8443"
+
+# CA 自身の TLS 証明書に載せる名前（省略時は external_url のホスト名）
+# Names on the CA's own TLS certificate (default: host of external_url)
+# hostnames: ["ca.internal.example.com"]
+
+# アカウント・発行履歴のデータベース / Database directory
+data_dir: "/var/lib/mtls-ca"
+
+root_cert: "/etc/mtls-ca/root.crt"
+intermediate_cert: "/etc/mtls-ca/intermediate.crt"
+intermediate_key: "/etc/mtls-ca/intermediate.key" # 0600 必須 / must be 0600
+
+# EAB 鍵ファイル（mtlsctl eab create で作成。0600 必須）/ EAB key file (must be 0600)
+eab_file: "/etc/mtls-ca/eab.json"
+
+# CA に接続できる送信元 / Source addresses allowed to connect
+allowed_client_cidrs:
+  - "10.0.0.0/8"
+
+policy:
+  # 発行してよいドメイン（自身とサブドメイン）/ Domains that may be issued (incl. subdomains)
+  allowed_domains:
+    - "internal.example.com"
+  # 1 枚の証明書に載せる名前の上限 / Max names per certificate
+  max_names_per_order: 10
+
+cert:
+  # 証明書の有効期間（10m〜90d）/ Certificate lifetime
+  validity: "24h"
+
+challenge:
+  types: ["http-01", "tls-alpn-01"]
+  http01_port: 80
+  tlsalpn01_port: 443
+  # 名前解決に使う DNS サーバ（省略時は OS の設定）/ DNS server for validation (default: OS resolver)
+  # resolver: "10.0.0.2:53"
+  timeout: "10s"
+  attempts: 3
+
+crl:
+  validity: "24h"
+
+log:
+  level: "info"  # debug / info / warn / error
+  format: "text" # text / json

@@ -1,0 +1,8 @@
+# mtls-reload-nginx.path から起動される / Triggered by mtls-reload-nginx.path
+[Unit]
+Description=Reload nginx after mTLS certificate renewal
+After=nginx.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/systemctl reload nginx.service

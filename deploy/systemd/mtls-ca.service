@@ -1,0 +1,44 @@
+# mtls-ca の systemd ユニット例 / Example systemd unit for mtls-ca
+#
+#   sudo useradd --system --home /var/lib/mtls-ca --shell /usr/sbin/nologin mtls-ca
+#   sudo install -m 0755 mtls-ca /usr/local/bin/
+#   sudo install -m 0644 mtls-ca.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now mtls-ca
+[Unit]
+Description=mtls-ca (private ACME CA for mTLS)
+Documentation=https://github.com/nobumin/mtls_manager
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=mtls-ca
+Group=mtls-ca
+ExecStart=/usr/local/bin/mtls-ca -config /etc/mtls-ca/config.yaml
+Restart=on-failure
+RestartSec=5s
+
+# 443 など 1024 未満のポートで待ち受ける場合に必要 / Needed to listen on ports below 1024
+# AmbientCapabilities=CAP_NET_BIND_SERVICE
+
+# ---- 権限の絞り込み / Hardening ----
+StateDirectory=mtls-ca
+StateDirectoryMode=0700
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
