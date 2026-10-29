@@ -22,6 +22,29 @@ const (
 	StateSuspended = "suspended" // 停止した（再開には照合と 2 人の承認をやり直す）
 )
 
+// 操作した経路。
+const (
+	// ViaAdmin は管理画面（管理者の名前は mTLS の証明書で確かめたもの）。
+	ViaAdmin = "admin-ui"
+	// ViaCLI は mtlsctl（管理者の名前は自己申告）。
+	ViaCLI = "cli"
+)
+
+// Actor は操作した管理者と経路。
+type Actor struct {
+	Name string
+	Via  string
+}
+
+// ByAdmin は管理画面からの操作（名前は mTLS の証明書で確かめたもの）。
+func ByAdmin(name string) Actor { return Actor{Name: name, Via: ViaAdmin} }
+
+// ByCLI は mtlsctl からの操作（名前は自己申告）。
+func ByCLI(name string) Actor { return Actor{Name: name, Via: ViaCLI} }
+
+// Verified は、名前を mTLS の証明書で確かめた操作かを返す。
+func (a Actor) Verified() bool { return a.Via == ViaAdmin }
+
 // DefaultPartnerValidity は連携の有効期限の既定（1 年）。
 const DefaultPartnerValidity = 365 * 24 * time.Hour
 
@@ -45,8 +68,10 @@ type Partner struct {
 	// ComparedWith は指紋を照合した相手と経路（ファイルとは無関係に前もって知っている連絡先）。
 	ComparedWith string    `json:"compared_with,omitempty"`
 	RequestedBy  string    `json:"requested_by,omitempty"`
+	RequestedVia string    `json:"requested_via,omitempty"`
 	RequestedAt  time.Time `json:"requested_at,omitzero"`
 	ApprovedBy   string    `json:"approved_by,omitempty"`
+	ApprovedVia  string    `json:"approved_via,omitempty"`
 	ApprovedAt   time.Time `json:"approved_at,omitzero"`
 	// Expires は連携の有効期限。過ぎたらバンドルに入れない（照合と承認をやり直す）。
 	Expires time.Time `json:"expires,omitzero"`
@@ -60,14 +85,15 @@ type Event struct {
 	At     time.Time `json:"at"`
 	Action string    `json:"action"`
 	By     string    `json:"by"`
+	Via    string    `json:"via,omitempty"`
 	Detail string    `json:"detail,omitempty"`
 }
 
 // Root は連携先のルート CA の証明書を返す。
 func (p *Partner) Root() (*x509.Certificate, error) { return parseRoot(p.RootCert) }
 
-func (p *Partner) record(action, by, detail string, now time.Time) {
-	p.Events = append(p.Events, Event{At: now.UTC().Truncate(time.Second), Action: action, By: by, Detail: detail})
+func (p *Partner) record(action string, by Actor, detail string, now time.Time) {
+	p.Events = append(p.Events, Event{At: now.UTC().Truncate(time.Second), Action: action, By: by.Name, Via: by.Via, Detail: detail})
 }
 
 // File は連携情報のファイル（federation.file）の中身。秘密情報は含まない。
@@ -87,7 +113,7 @@ func (f *File) Find(id string) *Partner {
 
 // Import は連携先の連携情報を取り込む（承認待ち）。ID は自分の側で付ける。
 // 同じルート CA・同じ ID の連携先がすでにあれば拒否する。
-func (f *File) Import(id string, rec *Record, root *x509.Certificate, now time.Time, by string) error {
+func (f *File) Import(id string, rec *Record, root *x509.Certificate, now time.Time, by Actor) error {
 	if err := ValidateID(id); err != nil {
 		return err
 	}
@@ -120,7 +146,7 @@ type RequestOptions struct {
 	Domains []string
 	// Validity は連携の有効期限までの期間。0 なら 1 年。
 	Validity time.Duration
-	By       string
+	By       Actor
 }
 
 // Request は 1 人目の管理者による承認の申請（設計 7-4 の 1.）。
@@ -142,7 +168,7 @@ func (f *File) Request(id string, o RequestOptions, ownScope []string, now time.
 	if o.ComparedWith == "" {
 		return errors.New("照合した相手と経路（ファイルとは無関係に前もって知っている連絡先）を入力する")
 	}
-	if o.By == "" {
+	if o.By.Name == "" {
 		return errors.New("申請する管理者の名前が無い")
 	}
 	scope := p.DeclaredDomains
@@ -167,8 +193,8 @@ func (f *File) Request(id string, o RequestOptions, ownScope []string, now time.
 		return errors.New("連携の有効期限は 1 日〜2 年")
 	}
 	p.State, p.Domains, p.ComparedWith = StateRequested, scope, o.ComparedWith
-	p.RequestedBy, p.RequestedAt = o.By, now.UTC().Truncate(time.Second)
-	p.ApprovedBy, p.ApprovedAt = "", time.Time{}
+	p.RequestedBy, p.RequestedVia, p.RequestedAt = o.By.Name, o.By.Via, now.UTC().Truncate(time.Second)
+	p.ApprovedBy, p.ApprovedVia, p.ApprovedAt = "", "", time.Time{}
 	p.Expires = now.Add(validity).UTC().Truncate(time.Second)
 	p.record("request", o.By, fmt.Sprintf("範囲 %v、照合 %s", scope, o.ComparedWith), now)
 	return nil
@@ -176,7 +202,7 @@ func (f *File) Request(id string, o RequestOptions, ownScope []string, now time.
 
 // Approve は 2 人目の管理者による承認（設計 7-4 の 2.）。申請者と同じ管理者は承認できない。
 // 承認者も指紋の全体を入力する（申請の内容を確かめたことの確認）。
-func (f *File) Approve(id, fingerprint, by string, ownScope []string, now time.Time) error {
+func (f *File) Approve(id, fingerprint string, by Actor, ownScope []string, now time.Time) error {
 	p := f.Find(id)
 	if p == nil {
 		return fmt.Errorf("連携先 %q が無い", id)
@@ -184,11 +210,11 @@ func (f *File) Approve(id, fingerprint, by string, ownScope []string, now time.T
 	if p.State != StateRequested {
 		return fmt.Errorf("連携先 %q は %s の状態なので承認できない（申請の後だけ）", id, p.State)
 	}
-	if by == "" {
+	if by.Name == "" {
 		return errors.New("承認する管理者の名前が無い")
 	}
-	if by == p.RequestedBy {
-		return fmt.Errorf("申請した管理者（%s）とは別の管理者が承認する", by)
+	if by.Name == p.RequestedBy {
+		return fmt.Errorf("申請した管理者（%s）とは別の管理者が承認する", by.Name)
 	}
 	if !FingerprintEqual(fingerprint, p.RootSHA256) {
 		return errors.New("入力した指紋が、取り込んだルート CA の指紋と一致しない")
@@ -199,13 +225,13 @@ func (f *File) Approve(id, fingerprint, by string, ownScope []string, now time.T
 	if !now.Before(p.Expires) {
 		return errors.New("申請した連携の有効期限が過ぎている（申請をやり直す）")
 	}
-	p.State, p.ApprovedBy, p.ApprovedAt = StateActive, by, now.UTC().Truncate(time.Second)
+	p.State, p.ApprovedBy, p.ApprovedVia, p.ApprovedAt = StateActive, by.Name, by.Via, now.UTC().Truncate(time.Second)
 	p.record("approve", by, fmt.Sprintf("範囲 %v", p.Domains), now)
 	return nil
 }
 
 // Suspend は連携を停止する。1 人で即時にできる（守る側の操作なので）。
-func (f *File) Suspend(id, by, reason string, now time.Time) error {
+func (f *File) Suspend(id string, by Actor, reason string, now time.Time) error {
 	p := f.Find(id)
 	if p == nil {
 		return fmt.Errorf("連携先 %q が無い", id)

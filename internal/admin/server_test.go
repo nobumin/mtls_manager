@@ -18,6 +18,7 @@ import (
 	"github.com/nobumin/mtls_manager/internal/admin"
 	"github.com/nobumin/mtls_manager/internal/config"
 	"github.com/nobumin/mtls_manager/internal/eab"
+	"github.com/nobumin/mtls_manager/internal/federation"
 	"github.com/nobumin/mtls_manager/internal/logbuf"
 	"github.com/nobumin/mtls_manager/internal/pki"
 	"github.com/nobumin/mtls_manager/internal/store"
@@ -89,7 +90,17 @@ func start(t *testing.T, mutate func(*config.CA)) *env {
 	log.Info("所有確認に失敗", "name", "web9."+testca.Domain)
 	e := &env{issuer: iss, logs: logs, eabHMAC: hmac, eabKID: kid, eabPath: eabPath, db: db}
 	revoke := func(serial string, reason int) error { return db.RevokeCert(serial, reason, nil) }
-	srv, err := admin.New(admin.Options{Config: cfg, Issuer: iss, DB: db, EAB: eabStore, Logs: logs, Logger: log, Started: now, Revoke: revoke})
+	var fed *federation.Builder
+	if cfg.Federation.File != "" {
+		st, err := federation.NewStore(cfg.Federation.File)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if fed, err = federation.NewBuilder(st, iss.Cert, iss.Key, []*x509.Certificate{iss.Root}, 0, log); err != nil {
+			t.Fatal(err)
+		}
+	}
+	srv, err := admin.New(admin.Options{Config: cfg, Issuer: iss, DB: db, EAB: eabStore, Logs: logs, Logger: log, Started: now, Revoke: revoke, Federation: fed})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -14,6 +14,7 @@
     <a href="/" {{if eq .Page "dashboard"}}class="active"{{end}}>概要</a>
     <a href="/certs" {{if eq .Page "certs"}}class="active"{{end}}>発行済み証明書</a>
     <a href="/eab" {{if eq .Page "eab"}}class="active"{{end}}>EAB 鍵</a>
+    <a href="/federation" {{if eq .Page "federation"}}class="active"{{end}}>連携</a>
     <a href="/logs" {{if eq .Page "logs"}}class="active"{{end}}>ログ</a>
   </nav>
   <div class="who">{{.Admin}}</div>

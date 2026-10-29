@@ -32,13 +32,13 @@ func startFederatedCA(t *testing.T) (*testca.CA, string, *pki.Issuer) {
 	own := []string{testca.Domain}
 	now := time.Now()
 	if err := federation.Update(fedFile, func(f *federation.File) error {
-		if err := f.Import("b-corp", rec, b.Root, now, "alice"); err != nil {
+		if err := f.Import("b-corp", rec, b.Root, now, federation.ByCLI("alice")); err != nil {
 			return err
 		}
-		if err := f.Request("b-corp", federation.RequestOptions{Fingerprint: fp, ComparedWith: "電話", By: "alice"}, own, now); err != nil {
+		if err := f.Request("b-corp", federation.RequestOptions{Fingerprint: fp, ComparedWith: "電話", By: federation.ByCLI("alice")}, own, now); err != nil {
 			return err
 		}
-		return f.Approve("b-corp", fp, "bob", own, now)
+		return f.Approve("b-corp", fp, federation.ByCLI("bob"), own, now)
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +94,7 @@ func TestSyncBundle(t *testing.T) {
 	}
 
 	// 停止すると、PEM は消さずに「どこにもつながらない PEM」に置き換わる。
-	if err := federation.Update(fedFile, func(f *federation.File) error { return f.Suspend("b-corp", "carol", "", time.Now()) }); err != nil {
+	if err := federation.Update(fedFile, func(f *federation.File) error { return f.Suspend("b-corp", federation.ByCLI("carol"), "", time.Now()) }); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(10 * time.Millisecond)

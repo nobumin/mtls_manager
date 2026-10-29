@@ -90,26 +90,26 @@ func TestApprovalWorkflow(t *testing.T) {
 	now := time.Now()
 	f := &federation.File{}
 
-	if err := f.Import("../b", rec, b.Root, now, "alice"); err == nil {
+	if err := f.Import("../b", rec, b.Root, now, federation.ByCLI("alice")); err == nil {
 		t.Error("不正な識別子で取り込めた")
 	}
-	if err := f.Import("b-corp", rec, b.Root, now, "alice"); err != nil {
+	if err := f.Import("b-corp", rec, b.Root, now, federation.ByCLI("alice")); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.Import("b-again", rec, b.Root, now, "alice"); err == nil {
+	if err := f.Import("b-again", rec, b.Root, now, federation.ByCLI("alice")); err == nil {
 		t.Error("同じルート CA を 2 回取り込めた")
 	}
 	// 承認待ちのままでは承認できない（申請が先）。
-	if err := f.Approve("b-corp", fp, "bob", own, now); err == nil {
+	if err := f.Approve("b-corp", fp, federation.ByCLI("bob"), own, now); err == nil {
 		t.Error("申請の前に承認できた")
 	}
-	req := federation.RequestOptions{Fingerprint: fp, ComparedWith: "契約書記載の B 社 情報システム部、電話", By: "alice"}
+	req := federation.RequestOptions{Fingerprint: fp, ComparedWith: "契約書記載の B 社 情報システム部、電話", By: federation.ByCLI("alice")}
 	for name, o := range map[string]federation.RequestOptions{
-		"指紋の一部だけ":     {Fingerprint: fp[:47], ComparedWith: req.ComparedWith, By: "alice"},
-		"違う指紋":        {Fingerprint: federation.Fingerprint(testca.NewIssuer(t, domainB).Root), ComparedWith: req.ComparedWith, By: "alice"},
-		"照合の相手なし":     {Fingerprint: fp, By: "alice"},
-		"申告より広い範囲":    {Fingerprint: fp, ComparedWith: req.ComparedWith, Domains: []string{"example.net"}, By: "alice"},
-		"自分の範囲と重なる範囲": {Fingerprint: fp, ComparedWith: req.ComparedWith, Domains: []string{"x." + domainA}, By: "alice"},
+		"指紋の一部だけ":     {Fingerprint: fp[:47], ComparedWith: req.ComparedWith, By: federation.ByCLI("alice")},
+		"違う指紋":        {Fingerprint: federation.Fingerprint(testca.NewIssuer(t, domainB).Root), ComparedWith: req.ComparedWith, By: federation.ByCLI("alice")},
+		"照合の相手なし":     {Fingerprint: fp, By: federation.ByCLI("alice")},
+		"申告より広い範囲":    {Fingerprint: fp, ComparedWith: req.ComparedWith, Domains: []string{"example.net"}, By: federation.ByCLI("alice")},
+		"自分の範囲と重なる範囲": {Fingerprint: fp, ComparedWith: req.ComparedWith, Domains: []string{"x." + domainA}, By: federation.ByCLI("alice")},
 	} {
 		if err := f.Request("b-corp", o, own, now); err == nil {
 			t.Errorf("%s: 申請できた", name)
@@ -118,7 +118,7 @@ func TestApprovalWorkflow(t *testing.T) {
 	// 自分の範囲と重なる申告は、そのままでは申請できない。
 	f2 := &federation.File{}
 	recOverlap, _ := federation.NewRecord(b.Root, []string{"b." + domainA}, "", nil)
-	_ = f2.Import("x", recOverlap, b.Root, now, "alice")
+	_ = f2.Import("x", recOverlap, b.Root, now, federation.ByCLI("alice"))
 	if err := f2.Request("x", req, own, now); err == nil {
 		t.Error("自分の範囲と重なる連携先を申請できた")
 	}
@@ -128,13 +128,13 @@ func TestApprovalWorkflow(t *testing.T) {
 	if err := f.Request("b-corp", narrowed, own, now); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.Approve("b-corp", fp, "alice", own, now); err == nil {
+	if err := f.Approve("b-corp", fp, federation.ByCLI("alice"), own, now); err == nil {
 		t.Error("申請者と同じ管理者が承認できた")
 	}
-	if err := f.Approve("b-corp", "00"+fp[2:], "bob", own, now); err == nil {
+	if err := f.Approve("b-corp", "00"+fp[2:], federation.ByCLI("bob"), own, now); err == nil {
 		t.Error("違う指紋で承認できた")
 	}
-	if err := f.Approve("b-corp", fp, "bob", own, now); err != nil {
+	if err := f.Approve("b-corp", fp, federation.ByCLI("bob"), own, now); err != nil {
 		t.Fatal(err)
 	}
 	p := f.Find("b-corp")
@@ -144,7 +144,7 @@ func TestApprovalWorkflow(t *testing.T) {
 	if err := f.Remove("b-corp"); err == nil {
 		t.Error("有効な連携先を停止せずに消せた")
 	}
-	if err := f.Suspend("b-corp", "carol", "連携先の侵害の疑い", now); err != nil || f.Find("b-corp").State != federation.StateSuspended {
+	if err := f.Suspend("b-corp", federation.ByCLI("carol"), "連携先の侵害の疑い", now); err != nil || f.Find("b-corp").State != federation.StateSuspended {
 		t.Fatalf("停止できない: %v", err)
 	}
 	if len(f.Find("b-corp").Events) != 4 {
@@ -238,7 +238,7 @@ func TestBundleSignAndVerify(t *testing.T) {
 	if c2, e2, _ := builder.Current(now); c2 != compact || e2 != etag {
 		t.Error("変化が無いのに作り直した")
 	}
-	if err := federation.Update(path, func(f *federation.File) error { return f.Suspend("b-corp", "carol", "", now) }); err != nil {
+	if err := federation.Update(path, func(f *federation.File) error { return f.Suspend("b-corp", federation.ByCLI("carol"), "", now) }); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(10 * time.Millisecond)
@@ -355,13 +355,13 @@ func approve(t *testing.T, path, id string, root *x509.Certificate, domains, own
 	now := time.Now()
 	fp := federation.Fingerprint(root)
 	if err := federation.Update(path, func(f *federation.File) error {
-		if err := f.Import(id, rec, root, now, "alice"); err != nil {
+		if err := f.Import(id, rec, root, now, federation.ByCLI("alice")); err != nil {
 			return err
 		}
-		if err := f.Request(id, federation.RequestOptions{Fingerprint: fp, ComparedWith: "電話", By: "alice"}, own, now); err != nil {
+		if err := f.Request(id, federation.RequestOptions{Fingerprint: fp, ComparedWith: "電話", By: federation.ByCLI("alice")}, own, now); err != nil {
 			return err
 		}
-		return f.Approve(id, fp, "bob", own, now)
+		return f.Approve(id, fp, federation.ByCLI("bob"), own, now)
 	}); err != nil {
 		t.Fatal(err)
 	}

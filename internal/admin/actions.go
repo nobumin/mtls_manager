@@ -223,7 +223,7 @@ func (s *Server) handleCertRevoke(w http.ResponseWriter, r *http.Request) {
 
 // fail は操作の失敗を、その画面に重ねて表示する（状態は変わっていないので redirect しない）。
 func (s *Server) fail(w http.ResponseWriter, r *http.Request, page string, status int, msg string) {
-	load := map[string]func(*http.Request) (any, error){"eab": s.eabData, "certs": s.certsData}[page]
+	load := map[string]func(*http.Request) (any, error){"eab": s.eabData, "certs": s.certsData, "federation": s.federationData}[page]
 	data, err := load(r)
 	if err != nil {
 		s.log.Error("管理画面: データを読めない", "page", page, "err", err)
@@ -238,12 +238,18 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, page string, statu
 var (
 	kidRe    = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 	serialRe = regexp.MustCompile(`^[0-9a-f]{1,40}$`)
+	fedIDRe  = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$`)
 	doneMsgs = map[string]struct {
 		arg  *regexp.Regexp
 		text string
 	}{
-		"eab-revoked":  {kidRe, "EAB 鍵 %s を取り消した。この鍵で登録したサーバは、以後新しい証明書を取得できない（発行済みの証明書は期限まで有効。すぐに止めるには失効させる）"},
-		"cert-revoked": {serialRe, "証明書 %s を失効させた。CRL に反映される"},
+		"eab-revoked":   {kidRe, "EAB 鍵 %s を取り消した。この鍵で登録したサーバは、以後新しい証明書を取得できない（発行済みの証明書は期限まで有効。すぐに止めるには失効させる）"},
+		"cert-revoked":  {serialRe, "証明書 %s を失効させた。CRL に反映される"},
+		"fed-imported":  {fedIDRe, "連携先 %s を取り込んだ（承認待ち）。指紋の全体を、前もって知っている相手の連絡先と別の経路で照合してから、承認を申請する"},
+		"fed-requested": {fedIDRe, "連携先 %s の承認を申請した。別の管理者が承認すると、トラストバンドルに入る"},
+		"fed-approved":  {fedIDRe, "連携先 %s を承認した。各サーバには次のトラストバンドルの取得（既定 1 分以内）で届く"},
+		"fed-suspended": {fedIDRe, "連携先 %s を停止した。各サーバには既定 1 分以内に届く（CA と各サーバの通信が妨げられていると、最悪はバンドルの有効期限まで残る）"},
+		"fed-removed":   {fedIDRe, "連携先 %s を消した"},
 	}
 )
 

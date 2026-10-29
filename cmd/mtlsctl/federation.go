@@ -157,7 +157,7 @@ func fedImport(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := federation.Update(env.file, func(f *federation.File) error { return f.Import(*id, rec, root, time.Now(), who) }); err != nil {
+	if err := federation.Update(env.file, func(f *federation.File) error { return f.Import(*id, rec, root, time.Now(), federation.ByCLI(who)) }); err != nil {
 		return err
 	}
 	fmt.Printf(`連携先 %s を取り込んだ（承認待ち。まだ信頼しない）。
@@ -202,7 +202,7 @@ func fedRequest(args []string) error {
 	if err != nil {
 		return err
 	}
-	o := federation.RequestOptions{Fingerprint: fingerprint, ComparedWith: *compared, Domains: domains, Validity: validity, By: who}
+	o := federation.RequestOptions{Fingerprint: fingerprint, ComparedWith: *compared, Domains: domains, Validity: validity, By: federation.ByCLI(who)}
 	var p federation.Partner
 	if err := federation.Update(env.file, func(f *federation.File) error {
 		if err := f.Request(*id, o, env.ownScope, time.Now()); err != nil {
@@ -243,7 +243,7 @@ func fedApprove(args []string) error {
 		return err
 	}
 	if err := federation.Update(env.file, func(f *federation.File) error {
-		return f.Approve(*id, fingerprint, who, env.ownScope, time.Now())
+		return f.Approve(*id, fingerprint, federation.ByCLI(who), env.ownScope, time.Now())
 	}); err != nil {
 		return err
 	}
@@ -271,7 +271,7 @@ func fedSuspend(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := federation.Update(env.file, func(f *federation.File) error { return f.Suspend(*id, who, *reason, time.Now()) }); err != nil {
+	if err := federation.Update(env.file, func(f *federation.File) error { return f.Suspend(*id, federation.ByCLI(who), *reason, time.Now()) }); err != nil {
 		return err
 	}
 	fmt.Printf("連携先 %s を停止した。各サーバには次のトラストバンドルの取得（既定 1 分以内）で届く。\n"+
@@ -325,7 +325,11 @@ func fedList(args []string) error {
 			p.ID, p.State, p.RootSHA256, p.DeclaredDomains, p.Domains, p.Organization, p.Contacts, p.ComparedWith,
 			p.RequestedBy, fmtTime(p.RequestedAt), p.ApprovedBy, fmtTime(p.ApprovedAt), fmtTime(p.Expires))
 		for _, e := range p.Events {
-			fmt.Printf("  %s  %-8s %-12s %s\n", e.At.Local().Format("2006-01-02 15:04"), e.Action, e.By, e.Detail)
+			via := "管理画面"
+			if e.Via == federation.ViaCLI {
+				via = "CLI・自己申告"
+			}
+			fmt.Printf("  %s  %-8s %-12s （%s） %s\n", e.At.Local().Format("2006-01-02 15:04"), e.Action, e.By, via, e.Detail)
 		}
 		return nil
 	}
