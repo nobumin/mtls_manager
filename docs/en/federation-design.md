@@ -2,8 +2,8 @@
 
 [日本語](../ja/federation-design.md)
 
-> **Status: stages 1 and 2 implemented** (stage 1: scoped verification in the `mtls` library, `mtlsctl federation`, trust bundle distribution by the CA, mtls-agent outputs;
-> stage 2: the admin UI's "Federation" page). Stage 3 is not implemented yet ([15.](#15-implementation-stages)). See the [operations guide](operations.md#federating-with-another-organization) for usage.
+> **Status: stages 1 and 2, plus root CA rotation announcements from stage 3 (11.), implemented** (stage 1: scoped verification in the `mtls` library,
+> `mtlsctl federation`, trust bundle distribution by the CA, mtls-agent outputs; stage 2: the admin UI's "Federation" page). Automatic CA-to-CA updates (12.) and CRL fetching (9-3) from stage 3 are not implemented yet ([15.](#15-implementation-stages)). See the [operations guide](operations.md#federating-with-another-organization) for usage.
 
 ## 1. Purpose and scope
 

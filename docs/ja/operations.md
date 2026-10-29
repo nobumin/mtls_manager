@@ -85,6 +85,19 @@ EAB 鍵に許可された名前の範囲内なら、mtls-agent の設定の `nam
 3. 新しいルート CA で中間 CA を作り、CA サーバを切り替える。
 4. 全サーバの証明書が新しいルート CA のものに更新されたら（既定なら 1 日後）、各サーバの `ca_root` から古いルート CA を外す。
 
+**連携版を使っている場合**は、連携先にも新しいルート CA を信頼してもらう必要があります。
+
+- 手順 1 の後、手順 3 の前に、オフラインの端末で**古いルート CA の鍵で署名した予告**を作り、各連携先に渡す。連携先は、いま信頼している古いルートで署名を確かめて取り込み、承認する（指紋の照合は不要）。
+
+  ```sh
+  mtlsctl root announce -old-root-cert old/root.crt -old-root-key old/root.key -new-root-cert new/root.crt \
+    -domains a.example.com -switch-at 2026-12-01 -out announce.jws
+  ```
+
+  `-domains` は、連携先に申告している範囲を超えないようにする（予告で範囲は広げられない）。予告の有効期限は既定 90 日。
+- 手順 4 の後、各連携先に古いルート CA を外してもらう（`retire-root`）。
+- **ルート CA の鍵が漏れた疑いがある場合は、予告を使わない**（漏れた鍵で署名した予告は信用できない）。各連携先に停止を依頼し、新しいルート CA で初回と同じ連携（照合と 2 人の承認）をやり直す。
+
 ## 別の組織と連携する（連携版）
 
 A 社のサーバと B 社のサーバのように、**別々の mtls-ca（別々のルート CA）で管理するサーバ間**を mTLS でつなぎます。
@@ -193,6 +206,27 @@ sudo mtlsctl federation suspend -config /etc/mtls-ca/config.yaml -id b-corp -rea
 **CA と各サーバの通信が妨げられている場合、最悪はトラストバンドルの有効期限（既定 2 日）まで信頼が残ります**。
 急ぐ場合は、各アプリの `AllowedPeers`（nginx は許可リスト）からも相手の名前を外してください。
 再開は、照合と 2 人の承認（手順 3）をやり直します。不要になったら `mtlsctl federation remove` で消します。消すと操作の記録もファイルから消えるので、先に `mtlsctl federation list -config ... -id <識別子>` で記録を控えてください（監査ログには要約が残ります）。
+
+### 7. 連携先のルート CA の入れ替えに追従する
+
+連携先がルート CA を入れ替えるときは、連携先から**古いルート CA の鍵で署名した予告**が届きます。
+
+1. 予告を取り込む（管理画面の「連携」画面の詳細から貼り付ける。または CLI）。署名は、いま信頼している古いルートで確かめるので、指紋の照合は不要。
+
+   ```sh
+   sudo mtlsctl federation announce -config /etc/mtls-ca/config.yaml -id b-corp -in announce.jws
+   ```
+
+   範囲を広げる予告・期限切れの予告・停止中の連携先への予告は受け付けない。
+2. 次のルートを承認する（1 人でよい）。承認すると、新旧の両方のルートを同じ範囲で信頼する。
+
+   ```sh
+   sudo mtlsctl federation approve-next -config /etc/mtls-ca/config.yaml -id b-corp
+   ```
+
+3. 連携先が新しいルートで発行し始めたと連絡を受けたら、古いルートを外す（`mtlsctl federation retire-root`）。取りやめる場合は `cancel-next`。
+
+連携先が「鍵の漏えい」を理由にルート CA を入れ替える場合、予告は使えません。連携を停止し、新しいルート CA で初回と同じ手順（照合と 2 人の承認）をやり直します。
 
 ### 監視
 

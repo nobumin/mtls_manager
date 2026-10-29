@@ -36,6 +36,7 @@ What mtls_manager protects against, and what it does not. Please read this befor
 | Man-in-the-middle against federated clients (federation) | Federated clients reject connections not made by host name (IP connections cannot have the host name checked). On the server side, `AllowAnyPeer` applies only to your own organization's peers, and partner peers must match `AllowedPeers` |
 | Swapping your own organization's trust by compromising the CA server (federation) | Your own root CA and scope never come from the trust bundle (the root from `CAFile`, the scope from the name constraints of the intermediate signed by the offline root). Bundles are signed with the intermediate key, and receivers check the signature, your root fingerprints and scope overlaps |
 | Replaying old trust bundles or suppressing suspensions (federation) | Bundles carry an epoch, sequence number and expiry (2 days by default), and older ones are rejected. Both mtls-agent and the `mtls` library compare them. On expiry only partners are dropped |
+| Substitution during a partner's root CA rotation (federation) | Rotation announcements are accepted only when signed with the old root key currently trusted. Announcements cannot widen the scope, expire (180 days at most), and cannot be used for suspended partners. Announcements are not used for rotations due to key compromise (suspend and redo the comparison and two-person approval) |
 
 ## What is not protected (needs measures on your side)
 

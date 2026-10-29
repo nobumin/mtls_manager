@@ -126,6 +126,11 @@ mtlsctl federation approve -config CA設定 -id ID [-fingerprint FP]
 mtlsctl federation suspend -config CA設定 -id ID [-reason TEXT]
 mtlsctl federation remove  -config CA設定 -id ID
 mtlsctl federation list    -config CA設定 [-id ID]
+mtlsctl federation announce     -config CA設定 -id ID -in F
+mtlsctl federation approve-next -config CA設定 -id ID
+mtlsctl federation retire-root  -config CA設定 -id ID
+mtlsctl federation cancel-next  -config CA設定 -id ID
+mtlsctl root announce -old-root-cert F -old-root-key F -new-root-cert F -domains D[,D...] -out F [-switch-at YYYY-MM-DD] [-validity 90d]
 mtlsctl inspect FILE
 ```
 
