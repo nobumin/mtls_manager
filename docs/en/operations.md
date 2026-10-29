@@ -85,6 +85,109 @@ Do this if the root key may have leaked or the root is close to expiring. It tou
 3. Create an intermediate under the new root and switch the CA server to it.
 4. Once every server's certificate has been renewed under the new root (after one day by default), remove the old root from each `ca_root`.
 
+## Federating with another organization
+
+Connect, with mTLS, servers **managed by separate mtls-cas (separate root CAs)**, such as company A's and company B's servers.
+Each side trusts the other's root CA **only for names within the other's scope (domains)**. See the [federation design](federation-design.md) for details.
+
+Prerequisites:
+
+- A and B use different domains (e.g. `a.example.com` for A and `b.example.net` for B)
+- Each organization's intermediate has name constraints (`mtlsctl intermediate sign -permitted-domain`). Federation cannot be used with an intermediate without name constraints
+
+### 1. Enable federation on the CA (both organizations)
+
+Add the following to `config.yaml` and restart mtls-ca.
+
+```yaml
+federation:
+  file: "/etc/mtls-ca/federation.json"
+```
+
+### 2. Exchange federation records (both organizations)
+
+```sh
+sudo mtlsctl federation export -config /etc/mtls-ca/config.yaml -org "Company A" -contacts security@a.example.com -out a.json
+```
+
+Give `a.json` to the partner (it contains no secrets, so email is fine). Import the partner's `b.json`:
+
+```sh
+sudo mtlsctl federation import -config /etc/mtls-ca/config.yaml -in b.json -id b-corp
+```
+
+`-id` is an identifier you choose (lowercase letters, digits, hyphens; used in file names).
+
+### 3. Compare the fingerprint and approve with two people
+
+1. Read the **whole fingerprint (64 digits)** aloud with **a partner contact you already know independently of the file** (the contact in the contract, etc.)
+   over **a channel other than the file's** (phone, in person). Do not use the contacts written in the file; they are the partner's unverified claims
+2. The first admin requests approval (typing the fingerprint while hearing it read aloud):
+
+   ```sh
+   sudo mtlsctl federation request -config /etc/mtls-ca/config.yaml -id b-corp \
+     -compared-with "Mr./Ms. X, IT department of Company B named in the contract; phone" -by alice
+   ```
+
+   Add `-domains api.b.example.net` to narrow the scope (it cannot exceed the partner's declaration).
+3. **Another** admin approves (typing the fingerprint again):
+
+   ```sh
+   sudo mtlsctl federation approve -config /etc/mtls-ca/config.yaml -id b-corp -by bob
+   ```
+
+The partner approves A the same way (traffic flows **only after both sides approve**).
+`mtlsctl federation list -config ... [-id b-corp]` shows the state and the record of operations.
+
+> In the stage 1 CLI, the `-by` name is self-declared (two-person approval only checks that the names differ).
+> Restrict who can log in to the CA server and review the record of operations (`federation list -id`) regularly.
+
+### 4. Receive partners with mtls-agent on each server
+
+Add the outputs (and, for nginx etc., the post-update command) to the mtls-agent configuration and restart it.
+
+```yaml
+output:
+  trust_bundle: "/etc/mtls-agent/tls/trust-bundle.jws"   # for the mtls library
+  federation_dir: "/etc/mtls-agent/federation"           # for nginx etc. (<id>.pem / <id>.domains)
+hooks:
+  post_bundle: ["/bin/sh", "-c", "nginx -t && systemctl reload nginx"]
+```
+
+mtls-agent fetches the trust bundle from the CA every minute by default, verifies its signature and contents, and writes it out.
+
+### 5. Accept partners in applications
+
+- **Go (`mtls` library)**: add `TrustBundleFile`, and add the partner's server names to `AllowedPeers`. Use the fullchain for `CertFile`.
+
+  ```go
+  cfg, err := mtls.NewServerTLSConfig(mtls.Config{
+      CertFile: "/etc/mtls-agent/tls/fullchain.pem", KeyFile: "/etc/mtls-agent/tls/key.pem",
+      CAFile: "/etc/mtls-agent/tls/ca.pem", TrustBundleFile: "/etc/mtls-agent/tls/trust-bundle.jws",
+      AllowedPeers: []string{"app1.a.example.com", "web1.b.example.net"},
+  })
+  ```
+
+- **nginx etc.**: they cannot check scopes, so **use a separate port for connections from the partner**, trust only
+  `federation_dir/<id>.pem` (that partner's root CA) there, and allow the partner's names as **exact names** (no wildcards).
+  At setup and after a suspension, confirm that `nginx -t` passes and that connections from the partner are rejected after the reload.
+
+### 6. Suspend a federation
+
+```sh
+sudo mtlsctl federation suspend -config /etc/mtls-ca/config.yaml -id b-corp -reason "suspected compromise" -by carol
+```
+
+One person can suspend immediately. Servers receive it within 1 minute by default, and the PEM in `federation_dir` is replaced with a "PEM that chains to nothing".
+**If traffic between the CA and the servers is blocked, trust may remain until the trust bundle expires (2 days by default) in the worst case.**
+In urgent cases, also remove the partner's names from each application's `AllowedPeers` (the allowlist for nginx).
+Resuming requires the comparison and two-person approval again (step 3). Remove a partner that is no longer needed with `mtlsctl federation remove`.
+
+### Monitoring
+
+`mtls-agent check` returns exit code 1 when the trust bundle has expired, has less than 1 day left, or the post-update command keeps failing.
+When a federation expiry (1 year by default) is less than 30 days away, mtls-ca logs a warning; redo the comparison and approval before then.
+
 ## Backup
 
 | Item | Location | Notes |
@@ -92,6 +195,7 @@ Do this if the root key may have leaked or the root is close to expiring. It tou
 | Root CA key | Offline machine | Two copies on encrypted media, stored apart from the CA server |
 | Intermediate key and certificate | `/etc/mtls-ca/` | If lost, create a new intermediate (no work on the servers) |
 | EAB key file | `/etc/mtls-ca/eab.json` | If lost, every server's EAB key must be re-issued |
+| Federation records file (federation) | `/etc/mtls-ca/federation.json` | Partners and approval records. If lost, comparison and approval must be redone (contains no secrets) |
 | Database | `/var/lib/mtls-ca/` | Accounts and issuance history. Copy while mtls-ca is stopped. If lost, servers must re-register |
 
 Backups contain private keys. Encrypt them and restrict access.

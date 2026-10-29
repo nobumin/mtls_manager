@@ -2,8 +2,8 @@
 
 [日本語](../ja/federation-design.md)
 
-> **Status: design proposal (not implemented).** It will be implemented in stages after review ([15.](#15-implementation-stages)).
-> Some decisions must be made before implementation ([16.](#16-open-decisions)).
+> **Status: stage 1 implemented** (scoped verification in the `mtls` library, `mtlsctl federation`, trust bundle distribution by the CA, mtls-agent outputs).
+> Stages 2 and 3 are not implemented yet ([15.](#15-implementation-stages)). See the [operations guide](operations.md#federating-with-another-organization) for usage.
 
 ## 1. Purpose and scope
 
@@ -66,7 +66,7 @@ Out of scope: meshes of three or more parties (each pair can federate individual
 | S-1 | Even if a partner's CA issues a certificate for **your organization's names** (your `allowed_domains`), it is not accepted |
 | S-2 | Even if a partner's CA issues a certificate for names outside the approved scope, it is not accepted |
 | S-3 | On first import, you can confirm the root CA was not substituted, without relying on the transport |
-| S-4 | A federation is never established by a single admin's decision (two approvals; in-house this can be relaxed to one) |
+| S-4 | A federation is never established by a single admin's decision (two approvals; required in-house too) |
 | S-5 | No secrets (keys) are ever received from the partner, and none are ever given to it |
 | S-6 | Servers do not keep using stale or tampered trust bundles |
 | S-7 | Even if the (online) CA server is compromised, it cannot make other CAs trusted for **your organization's names** (the damage stays, as before, within the intermediate's name constraints, plus the addition of partners) |
@@ -233,7 +233,9 @@ that it was not substituted (integrity), and that is confirmed by the fingerprin
 2. **Another** admin reviews and "approves" (the same admin cannot approve)
 3. Once approved, the record becomes "active" and enters the trust bundle
 
-- In-house: a setting (`federation.require_two_approvals: false`) allows a single approval
+- Two-person approval is required, including in-house (no setting to make it one person; decided)
+- In the stage 1 CLI (`mtlsctl federation request / approve`), the admin name (`-by`) is self-declared, and only "requester and approver have different names" is checked.
+  Identity checks with mTLS certificates come with the stage 2 admin UI
 - Requests, approvals and rejections are all audit-logged (admin name, partner, fingerprint, scope, whom it was compared with and over which channel)
 - An expiry (default 1 year) is set; warnings appear in the admin UI and logs from 30 days before. Renewal repeats 7-3 and 7-4 (re-comparison)
 
@@ -423,7 +425,7 @@ The following must be decided before implementation.
 | --- | --- | --- |
 | 1 | Relationship between A and B | **Decided: design for different organizations** (also usable as is within one company) |
 | 2 | Approach for in-house use | **Decided: use the federated version.** Sharing the root CA with one intermediate per network (the alternative in 2.) remains a simple option that needs no implementation |
-| 3 | Two-person approval | Required by default? (recommended: required; can be turned off in-house) |
+| 3 | Two-person approval | **Decided: required** (including in-house; no setting to make it one person) |
 | 4 | Support for nginx etc. | Is the "separate ports" procedure in 9-2 enough, or should a sidecar be provided? |
 | 5 | Automatic CA-to-CA updates (stage 3) | Needed? Does the network allow CA-to-CA traffic? |
 | 6 | Revocation of partner certificates | Are short lifetimes enough, or should CRLs be fetched? |

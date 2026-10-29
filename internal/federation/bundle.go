@@ -307,7 +307,7 @@ func (b *Builder) Current(now time.Time) (string, string, error) {
 	if !issued.After(b.lastIssued) {
 		issued = b.lastIssued.Add(time.Second)
 	}
-	bundle := &Bundle{Format: BundleFormat, Epoch: b.epoch, Seq: b.seq + 1, IssuedAt: issued, Expires: issued.Add(b.validity)}
+	bundle := &Bundle{Format: BundleFormat, Epoch: b.epoch, Seq: b.seq + 1, IssuedAt: issued, Expires: issued.Add(b.validity), Partners: []BundlePartner{}}
 	for _, r := range b.ownRoots {
 		bundle.OwnRoots = append(bundle.OwnRoots, Fingerprint(r))
 	}

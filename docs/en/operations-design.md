@@ -286,6 +286,7 @@ Adjust the location in your backups ([14.](#14-backup-and-restore)) accordingly.
 | Root CA key and certificate | Once, at creation | Two copies on encrypted media, stored in separate places |
 | Intermediate key and certificate | At creation and rotation | Store encrypted |
 | EAB key file (`eab.json`) | On every change | Store encrypted |
+| Federation records file (`federation.json`, federation) | On every change | Keep a copy (contains no secrets; if lost, comparison and approval must be redone) |
 | Database (`data_dir`) | Daily | Stop mtls-ca and copy it (a few seconds). Copies taken while running may be corrupt |
 | Configuration files | On every change | Keep in configuration management (contains no secrets) |
 

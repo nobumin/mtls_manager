@@ -27,6 +27,7 @@ you need your own CA. mtls_manager aims to make in-house mTLS as easy to operate
 - **Easy to integrate**: the Go library (`mtls` package) adds hot certificate reloading and a peer-name allowlist in a few lines.
   It also works with existing software such as nginx and curl.
 - **Admin web UI**: view the overview, issued certificates, EAB keys and logs in a browser. Authorized admins can also issue and revoke EAB keys and revoke certificates (without stopping the CA). Login is mTLS with certificates issued by this CA, and every access is audit-logged.
+- **Federation with other organizations**: servers managed by separate mtls-cas (separate root CAs) can also connect with mTLS, each trusting the other's root CA only within the other's scope (domains). Federations are established with fingerprint comparison and two-person approval, and one person can suspend them immediately ([operations guide](docs/en/operations.md#federating-with-another-organization)).
 - **Linux first, macOS supported**: example systemd units and launchd jobs are included.
 
 ## Architecture
@@ -87,7 +88,7 @@ Follow the [getting started guide](docs/en/getting-started.md):
 | [Operations guide](docs/en/operations.md) | Adding/removing servers, revocation, intermediate rotation, backup, monitoring, troubleshooting |
 | [Operations design guide (detailed)](docs/en/operations-design.md) | Network design, what is automated, admin UI, monitoring, failure and incident response, backup, pre-deployment checklist |
 | [Security design](docs/en/security.md) | Threat model, what is and is not protected, recommendations |
-| [Federation design (proposal)](docs/en/federation-design.md) | mTLS between servers managed by separate mtls-managers (scoped mutual trust of root CAs). Not implemented yet |
+| [Federation design](docs/en/federation-design.md) | mTLS between servers managed by separate mtls-managers (scoped mutual trust of root CAs). Stage 1 implemented |
 | [SECURITY.md](SECURITY.md) | How to report vulnerabilities |
 
 ## Handling of secrets
