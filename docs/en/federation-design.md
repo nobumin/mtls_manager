@@ -161,9 +161,16 @@ The accepting `mtls` library also checks overlaps ([6-4.](#6-4-your-own-root-ca-
 The trust bundle is built and signed by the online CA server (intermediate CA key). If the CA server is compromised, the attacker can sign and
 distribute any bundle. So **a bundle can only change "trust in partners"**; trust in your own organization never depends on the bundle (S-7).
 
-- Your own root CA is read, as before, from `CAFile` (mtls-agent's `ca_root` / `output.ca`). The bundle carries your root's fingerprint for reference
-  only; if it differs from `CAFile`, **the whole bundle is rejected**
-- Your own scope is held in local configuration (the `mtls` library's `Config.OwnDomains`, written out from mtls-agent's configuration). The bundle's value is not used
+- Your own root CA is read, as before, from `CAFile` (mtls-agent's `ca_root` / `output.ca`). The bundle carries **a list of your root fingerprints**
+  for reference (two during a root rotation, old and new), and it is checked that **every one of them is among the roots in `CAFile`** (if the list is
+  empty or contains a fingerprint not in `CAFile`, **the whole bundle is rejected**). "Contained in" is used so that federation does not break mid-rotation
+  as long as each server's `ca_root` is switched to old+new first (the rotation order will be added to "Rotating the root CA" in the operations guide at implementation time)
+- Your own scope (`OwnDomains`) is taken from **your intermediate CA's name constraints** (`PermittedDNSDomains`). The intermediate certificate is signed by the
+  offline root, so the online CA server cannot rewrite it. The intermediate certificate is verified against the root in `CAFile` before use (it is in your own certificate's fullchain)
+  - Local configuration (values written by people) may only **narrow** it (values broader than the name constraints are not used)
+  - It is **never taken from CA responses** (bundle, directory or any other API)
+  - If no scope can be obtained (the intermediate has no name constraints, or they are empty), **no partner is trusted at all** (with an error log).
+    The federated version cannot be used with an intermediate without name constraints (`mtlsctl intermediate csr -no-name-constraints`)
 - The `mtls` library **rejects partners whose scope overlaps your own scope** (only that partner is dropped from the bundle, with an error log).
   It does not rely only on the CA's processing (6-3)
 - Even so, a compromised CA server can add "partners" (limited to names not overlapping your scope). Stage 1 cannot prevent this, so it is stated
@@ -239,7 +246,7 @@ Federation is **separate in each direction**. mTLS works both ways only after A 
 
 ### 8-1. mtls-ca → mtls-agent
 
-- mtls-ca serves the trust bundle (active federation records, plus your root's fingerprint for reference) at `GET /federation/bundle` on the ACME port
+- mtls-ca serves the trust bundle (active federation records, plus the list of your root fingerprints for reference) at `GET /federation/bundle` on the ACME port
 - The content is public but **needs integrity**, so mtls-agent fetches it only over its existing connection to the CA (TLS verified with its own root CA)
 - The bundle carries **an epoch, a sequence number, issue time and expiry (default 2 days)** and is signed with the intermediate CA key (JWS).
   mtls-agent checks the signature and rejects replays of old bundles (S-6)
@@ -263,9 +270,15 @@ mtls-agent writes new outputs (the existing `output.ca` stays your own root CA o
 | `output.trust_bundle` | Trust bundle (JSON: each partner's root CA certificate and scope, expiry, signature) | `mtls` library |
 | `output.federation_dir` | One PEM per partner (`<partner>.pem`, that partner's root CA only) and its scope (`<partner>.domains`) | nginx etc. ([9-2.](#9-2-other-than-the-mtls-library-nginx-etc)) |
 
-- Files of suspended partners, or of partners in an expired bundle, are **deleted** from `output.federation_dir`
+- `<partner>` is **an identifier chosen on your side**: a short name given by the admin at approval time (`[a-z0-9-]{1,32}`, unique among partners),
+  unchanged across root rotations (11.) so the file names referenced by nginx configuration stay the same. **The partner's claims (`organization` etc.) are never used in file names**
+  (preventing path manipulation via `../` and overwrites between partners claiming the same name)
+- Files of suspended partners, or of partners in an expired bundle, are **not deleted but replaced with a "PEM that chains to nothing"**:
+  a single self-signed certificate generated on the spot by mtls-agent, whose private key is discarded immediately (no certificate chains to it).
+  Deleting the file would make nginx fail its configuration test and skip the reload, **keeping the old PEM loaded and continuing to trust the partner**
 - **No PEM mixing your own and partners' root CAs is written** (configurations that merely trust it cannot satisfy S-1 and S-2, and that dangerous setup would become the easiest one)
-- As before, files are written to a temporary file and renamed, and a "command after bundle update" can be run in the same way as `hooks.post_renew`
+- As before, files are written to a temporary file and renamed, and a "command after bundle update" can be run in the same way as `hooks.post_renew`.
+  **If the command fails, mtls-agent logs an error and retries until it succeeds** (so a suspension that never reached nginx does not go unnoticed)
 
 ## 9. Verification at connection time
 
@@ -273,12 +286,15 @@ mtls-agent writes new outputs (the existing `output.ca` stays your own root CA o
 
 - Add `TrustBundleFile` and `OwnDomains` to `Config`. `CAFile` (your own root CA) stays required; `TrustBundleFile` is specified **in addition**
   when partners are to be trusted (6-4)
+- Your own scope is taken from the **intermediate CA's name constraints** in your own certificate's fullchain (verified against the root in `CAFile` before use).
+  `OwnDomains` is used only to **narrow** it (values broader than the name constraints are ignored with an error log).
+  If no scope can be obtained (no or empty name constraints), **no partner is trusted at all**, even with `TrustBundleFile` set (with an error log)
 - The trust bundle is **reloaded without a restart**, like certificates (the current bundle is used via `GetConfigForClient` / `VerifyConnection`)
 - Checks when reading a bundle (if they fail, that bundle is not used, and the previously accepted bundle is used until its expiry):
   - Signature, epoch, sequence number and expiry (8-1). **When the bundle expires, only the partners' roots are dropped** (your own root comes from
     `CAFile` and stays trusted as before). The drop is logged as an error
-  - The bundle's "your root fingerprint" matches `CAFile`. If not, the whole bundle is rejected
-  - Partner scopes do not overlap `OwnDomains`. Overlapping partners are dropped with an error log (6-4)
+  - The bundle's "list of your root fingerprints" is not empty and **every entry is among the roots in `CAFile`**. Otherwise the whole bundle is rejected (6-4)
+  - Partner scopes do not overlap your own scope (the name constraints above, as narrowed by `OwnDomains`). Overlapping partners are dropped with an error log (6-4)
 - Verification steps:
   1. Normal chain verification (the root in `CAFile` and the partners' roots in the bundle are trust anchors)
   2. A chain to your own root is a candidate for acceptance, as before
@@ -297,7 +313,9 @@ nginx and similar software cannot check "a scope per root CA" or the "accepted c
   and check the peer names (`$ssl_client_s_dn` or SAN) against an allowlist. Connections from your own organization use another port that trusts only your own root CA
   - The allowlist then does the job of the scope check, so **only list exact names within that partner's scope**
     (no wildcards, since wildcard certificates cannot be rejected)
-  - Suspending the federation deletes the PEM, so reloading nginx removes the trust (reload it from the "command after bundle update")
+  - Suspending the federation replaces the PEM with a "PEM that chains to nothing", so reloading nginx removes the trust (run
+    `nginx -t && systemctl reload nginx` from the "command after bundle update")
+  - At setup and after a suspension, confirm that `nginx -t` passes and that connections from the partner are rejected after the reload
 - Put a small relay (sidecar) built on the `mtls` library in front
 
 ### 9-3. Revocation
@@ -312,7 +330,7 @@ nginx and similar software cannot check "a scope per root CA" or the "accepted c
 - Suspension advances the trust bundle sequence; each mtls-agent picks it up at its next check (within 1 minute by default), and applications reject connections once they reload it
 - **Worst-case delay**: if traffic between mtls-agent and the CA is blocked (or the CA is down), the suspension does not arrive and the partner stays trusted
   until the local bundle's **expiry (default 2 days)**. In urgent cases, remove the partner's server names from each application's `AllowedPeers` (9-3),
-  or delete the partner's file in `output.federation_dir` by hand and reload
+  or, for nginx etc., remove the configuration that trusts the partner's PEM and reload (just deleting the file makes the reload fail; 8-2)
 - Suspended records are kept; resuming requires repeating 7-3 and 7-4 (comparison and two approvals)
 - The procedure for when a partner's CA is found compromised (suspend → contact → impact investigation → re-federate with a new root) will be added to the incident response section of the operations design guide
 
@@ -356,11 +374,13 @@ Where CAs can reach each other, the following can be automated, so manual compar
 | The root CA is substituted during the first exchange | Out-of-band comparison of the whole fingerprint (7-3). The whole compared fingerprint must be typed on the approval screen (7-4) |
 | The attacker gets compared with via contacts in a substituted file | The person compared with must be a contact known in advance, independently of the file (7-3). File contacts are shown as "unverified", and whom it was compared with and over which channel is audit-logged (7-2, 7-4) |
 | A single admin approves a federation improperly | Two approvals (7-4). Audit log |
-| The (online) CA server is compromised and signs and distributes a malicious bundle | Your own root and scope never come from the bundle, and the library rejects overlaps (6-4). **Adding "partners" that do not overlap your scope cannot be prevented, though** (a stage 1 limitation; to be stated in "What is not protected" in `security.md` at implementation time; signatures by approvers' keys are considered in 16.) |
+| The (online) CA server is compromised and signs and distributes a malicious bundle | Your own root and scope never come from the bundle (the scope comes from the name constraints of the intermediate signed by the offline root), and the library rejects overlaps (6-4). **Adding "partners" that do not overlap your scope cannot be prevented, though** (a stage 1 limitation; to be stated in "What is not protected" in `security.md` at implementation time; signatures by approvers' keys are considered in 16.) |
 | A server is kept on a stale trust bundle (from before suspension) | Bundle epoch, sequence number, expiry and signature (8-1). Partners' roots are dropped on expiry (9-1). **In the worst case, trust continues until the expiry (default 2 days) without the suspension arriving** (10.) |
 | The CA is restored from backup and the sequence goes back | The epoch changes, and a newer issue time is accepted (8-1) |
 | A partner compromise is noticed late | Suspension is immediate by one person (10.). Contacts are part of the record. Expiry forces periodic review |
 | Software that cannot check scopes (nginx etc.) accepts names outside the scope | Separate ports that trust only the per-partner PEM; the allowlist lists only exact names within the scope (9-2) |
+| After a suspension, nginx etc. keep the old PEM loaded and continue to trust the partner | Files are replaced with a "PEM that chains to nothing" instead of deleted, so the reload succeeds. Failures of the post-update command are logged as errors and retried (8-2) |
+| A partner-claimed name writes outside the output directory or overwrites another partner's files | File names use only identifiers chosen on your side (8-2) |
 | Partners increase and one is approved with the wrong scope (too broad or overlapping) | The approval screen mechanically checks the breadth and overlaps with your domains and other partners; also checked at startup and when building bundles (6-3) |
 | The old root key is compromised and a forged rotation announcement is made with it | Announcements cannot widen the scope and expire (11.). Announcements are not used for rotations due to key compromise (11.) |
 
@@ -385,10 +405,13 @@ Each stage adds tests to CI. Stage 1 checks at least:
 
 - Rejection of names outside the scope, wildcard DNS names, non-DNS SANs and certificates without DNS names; acceptance when one of several chains qualifies
 - Rejection of partners overlapping your own scope (in both the CA and the library); rejection of scopes that are too broad (one label, public suffixes)
-- Rejection of bundles whose "your root fingerprint" differs from `CAFile`
+- Rejection of bundles whose list of your root fingerprints is empty or contains a fingerprint not in `CAFile`; acceptance during a root rotation (old and new in `CAFile`)
+- Your own scope comes from the intermediate's name constraints; no partner is trusted without name constraints; `OwnDomains` cannot widen it
 - Rejection of stale bundles (sequence going back); acceptance of a new epoch only with a newer issue time
 - On bundle expiry, only partners are dropped and your own root stays trusted
-- Propagation of suspension (files in `output.federation_dir` are deleted)
+- Propagation of suspension (files in `output.federation_dir` are replaced with a "PEM that chains to nothing"); validation of the identifier format
+- Retries when the "command after bundle update" fails
+
 Stage 1 also adds an integration test with two CAs (servers of A and B connect through federation, and fail outside the scope).
 
 ## 16. Open decisions
