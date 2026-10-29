@@ -1,0 +1,18 @@
+{{define "content"}}
+<form class="filter" id="log-filter">
+  <select name="level" id="log-level">
+    <option value="DEBUG">すべて（debug 以上）</option>
+    <option value="INFO" selected>info 以上</option>
+    <option value="WARN">warn 以上</option>
+    <option value="ERROR">error のみ</option>
+  </select>
+  <input type="search" id="log-q" placeholder="文字列で絞り込み（例: category=audit、serial=…）">
+  <label><input type="checkbox" id="log-follow" checked> 自動更新</label>
+</form>
+<p class="muted">mtls-ca の起動以降の直近のログ（件数に上限あり）。それより前のログは journald などの通常の出力先で確認する。</p>
+<table id="log-table" class="logs">
+  <thead><tr><th>時刻</th><th>重要度</th><th>メッセージ</th><th>属性</th></tr></thead>
+  <tbody></tbody>
+</table>
+<script src="/static/logs.js"></script>
+{{end}}

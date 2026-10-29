@@ -1,0 +1,12 @@
+{{define "content"}}{{with .Data}}
+<div class="alert">HMAC 鍵は<strong>この画面でしか表示しない</strong>（再表示はできない）。いま控えて、対象のサーバへ安全な経路で運び、
+mtls-agent の <span class="mono">eab.hmac_file</span>（権限 0600）に保存する。失くしたら、この鍵を取り消して発行し直す。</div>
+<table class="kv">
+  <tr><th>kid（eab.kid）</th><td class="mono">{{.KID}}</td></tr>
+  <tr><th>HMAC 鍵（eab.hmac_file の中身）</th><td class="mono secret">{{.HMAC}}</td></tr>
+  <tr><th>発行してよい名前</th><td>{{join .Names ", "}}</td></tr>
+  <tr><th>メモ</th><td>{{.Note}}</td></tr>
+  <tr><th>作成</th><td>{{fmtTime .CreatedAt}}</td></tr>
+</table>
+<p><a href="/eab">EAB 鍵の一覧へ戻る</a></p>
+{{end}}{{end}}

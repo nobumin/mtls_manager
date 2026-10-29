@@ -1,0 +1,32 @@
+# 鍵・証明書・秘密情報は絶対にコミットしない / Never commit keys, certificates or secrets
+*.key
+*.pem
+*.crt
+*.csr
+*.der
+*.p12
+*.pfx
+*.hmac
+eab.json
+*.db
+
+# 実運用の設定は examples/ をリポジトリ外にコピーして使う / Real configs live outside the repo
+/config/
+/configs/
+*.local.yaml
+
+# ビルド成果物 / Build outputs
+/bin/
+/dist/
+/mtlsctl
+/mtls-ca
+/mtls-agent
+*.test
+*.out
+coverage.*
+
+# エディタ・OS / Editors and OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
