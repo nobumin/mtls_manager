@@ -1,0 +1,18 @@
+{{define "content"}}{{with .Data}}
+<p class="muted">EAB 鍵は、サーバごとに証明書の発行を許可する鍵。HMAC 鍵（秘密情報）はこの画面には表示しない。発行・取り消しは mtlsctl eab で行う。</p>
+<table>
+  <thead><tr><th>メモ</th><th>発行してよい名前</th><th>アカウント</th><th>最後の発行</th><th>作成</th><th>kid</th></tr></thead>
+  <tbody>
+  {{range .Rows}}
+    <tr><td>{{.Note}}</td><td>{{join .Names ", "}}</td><td>{{.Accounts}}</td><td>{{fmtTime .LastIssued}}</td><td>{{fmtTime .CreatedAt}}</td><td class="mono">{{.KID}}</td></tr>
+  {{else}}
+    <tr><td colspan="6" class="muted">EAB 鍵はない</td></tr>
+  {{end}}
+  </tbody>
+</table>
+{{if .Orphans}}
+<h2>取り消し済みの EAB 鍵に結び付いたアカウント</h2>
+<p class="muted">これらの kid で登録したサーバは、新しい証明書を取得できない。</p>
+<ul class="mono">{{range .Orphans}}<li>{{.}}</li>{{end}}</ul>
+{{end}}
+{{end}}{{end}}

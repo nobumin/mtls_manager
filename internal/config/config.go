@@ -57,14 +57,17 @@ func (d *Duration) UnmarshalYAML(n *yaml.Node) error {
 func (d Duration) D() time.Duration { return time.Duration(d) }
 
 // NewLogger は設定に従ったロガーを作る。
-func (l Log) NewLogger(w io.Writer) *slog.Logger {
+func (l Log) NewLogger(w io.Writer) *slog.Logger { return slog.New(l.NewHandler(w)) }
+
+// NewHandler は設定に従った slog.Handler を作る。
+func (l Log) NewHandler(w io.Writer) slog.Handler {
 	var level slog.Level
 	_ = level.UnmarshalText([]byte(l.Level))
 	opts := &slog.HandlerOptions{Level: level}
 	if l.Format == "json" {
-		return slog.New(slog.NewJSONHandler(w, opts))
+		return slog.NewJSONHandler(w, opts)
 	}
-	return slog.New(slog.NewTextHandler(w, opts))
+	return slog.NewTextHandler(w, opts)
 }
 
 // load は未知のキーをエラーにして読む（綴り間違いを黙って無視しない）。

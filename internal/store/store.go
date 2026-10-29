@@ -92,7 +92,9 @@ type Cert struct {
 	Names     []string  `json:"names"`
 	NotBefore time.Time `json:"not_before"`
 	NotAfter  time.Time `json:"not_after"`
-	ChainPEM  []byte    `json:"chain_pem"` // 末端 + 中間 CA
+	// IssuedAt は発行した時刻（NotBefore は時計のずれに備えて過去にずらしてあるので、表示にはこちらを使う）。
+	IssuedAt time.Time `json:"issued_at,omitzero"`
+	ChainPEM []byte    `json:"chain_pem"` // 末端 + 中間 CA
 	// Pending は署名の前に記録しただけで、まだ発行を完了していないことを表す（ReserveCert）。
 	// 署名後にプロセスが落ちても、このシリアルは一覧・失効・CRL の対象になる。
 	Pending   bool      `json:"pending,omitempty"`
@@ -458,4 +460,28 @@ func (d *DB) ResetProcessingChallenges() (reset int, err error) {
 		return nil
 	})
 	return reset, err
+}
+
+// Accounts はすべてのアカウントを返す（管理画面用）。
+func (d *DB) Accounts() ([]Account, error) {
+	var out []Account
+	err := d.bolt.View(func(tx *bolt.Tx) error {
+		return tx.Bucket(bucketAccounts).ForEach(func(k, v []byte) error {
+			var a Account
+			if err := json.Unmarshal(v, &a); err != nil {
+				return err
+			}
+			out = append(out, a)
+			return nil
+		})
+	})
+	return out, err
+}
+
+// Issued は発行した時刻を返す（古い記録で IssuedAt が無ければ NotBefore）。
+func (c Cert) Issued() time.Time {
+	if c.IssuedAt.IsZero() {
+		return c.NotBefore
+	}
+	return c.IssuedAt
 }

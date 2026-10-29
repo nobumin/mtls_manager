@@ -569,7 +569,7 @@ func (s *Server) handleFinalize(r *http.Request, req *request) (*reply, *problem
 	}
 	if err := s.db.FinalizeOrder(o.ID, &store.Cert{
 		Serial: serial, AccountID: req.account.ID, OrderID: o.ID, Names: o.Names,
-		NotBefore: leaf.NotBefore, NotAfter: leaf.NotAfter, ChainPEM: pki.EncodeCertsPEM(leaf, s.issuer.Cert),
+		NotBefore: leaf.NotBefore, NotAfter: leaf.NotAfter, IssuedAt: time.Now().UTC(), ChainPEM: pki.EncodeCertsPEM(leaf, s.issuer.Cert),
 	}); err != nil {
 		// 予約の記録は残っているので、このシリアルは失効できる。
 		s.log.Error("発行した証明書を記録できない（予約の記録は残っている）", "order", o.ID, "serial", serial, "err", err)

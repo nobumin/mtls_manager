@@ -93,6 +93,8 @@ Backups contain private keys. Encrypt them and restrict access.
 
 ## Monitoring
 
+- With the admin UI enabled (`admin.listen`), you can check CA certificate expiry, late renewals and recent logs in a browser
+  (see the [operations design guide](operations-design.md#9-admin-web-ui)).
 - `mtls-agent check -config ...` returns **exit code 1** when renewal is needed (expired, overdue, name mismatch, etc.).
   Run it periodically from your monitoring system.
 - `https://ca.internal.example.com:8443/healthz` reports CA liveness.

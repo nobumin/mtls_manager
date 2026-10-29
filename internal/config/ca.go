@@ -42,10 +42,30 @@ type CA struct {
 	Cert      CACert      `yaml:"cert"`
 	Challenge CAChallenge `yaml:"challenge"`
 	CRL       CACRL       `yaml:"crl"`
+	Admin     CAAdmin     `yaml:"admin"`
 	Log       Log         `yaml:"log"`
 
 	allowedPrefixes []netip.Prefix
 }
+
+// CAAdmin は管理画面（閲覧用の Web 画面）の設定。Listen が空なら無効。
+type CAAdmin struct {
+	// Listen は管理画面の待ち受けアドレス。ACME とは別のポートにし、localhost か管理用のサブネットの
+	// アドレスで待ち受ける（例: "127.0.0.1:9443"、"10.0.100.5:9443"）。空なら管理画面を起動しない。
+	Listen string `yaml:"listen"`
+	// AllowedClients は管理画面に入れる管理者の証明書の名前（パターン）。Listen を指定したら必須。
+	// 管理者は、この CA が発行したクライアント証明書でログインする（mTLS）。パスワードは使わない。
+	AllowedClients []string `yaml:"allowed_clients"`
+	// AllowedCIDRs は管理画面に接続できる送信元。空なら制限しない（Listen のアドレスで絞る）。
+	AllowedCIDRs []string `yaml:"allowed_cidrs"`
+	// LogBuffer は管理画面で閲覧できるログの件数（メモリに保持する直近の分）。既定 5000。
+	LogBuffer int `yaml:"log_buffer"`
+
+	allowedPrefixes []netip.Prefix
+}
+
+// AllowedPrefixes は解釈済みの送信元制限を返す。
+func (a CAAdmin) AllowedPrefixes() []netip.Prefix { return a.allowedPrefixes }
 
 // CAPolicy は発行してよい名前の方針。
 type CAPolicy struct {
@@ -134,17 +154,8 @@ func (c *CA) Complete() error {
 			return fmt.Errorf("%s は必須", f.name)
 		}
 	}
-	c.allowedPrefixes = nil
-	for _, s := range c.AllowedClientCIDRs {
-		p, err := netip.ParsePrefix(s)
-		if err != nil {
-			a, aerr := netip.ParseAddr(s)
-			if aerr != nil {
-				return fmt.Errorf("allowed_client_cidrs: %q を解釈できない", s)
-			}
-			p = netip.PrefixFrom(a, a.BitLen())
-		}
-		c.allowedPrefixes = append(c.allowedPrefixes, p.Masked())
+	if c.allowedPrefixes, err = parsePrefixes("allowed_client_cidrs", c.AllowedClientCIDRs); err != nil {
+		return err
 	}
 
 	if len(c.Policy.AllowedDomains) == 0 {
@@ -206,6 +217,9 @@ func (c *CA) Complete() error {
 	if c.CRL.Validity == 0 {
 		c.CRL.Validity = Duration(24 * time.Hour)
 	}
+	if err := c.Admin.complete(); err != nil {
+		return err
+	}
 	return c.Log.complete()
 }
 
@@ -228,4 +242,48 @@ func (l *Log) complete() error {
 		return fmt.Errorf("log.format: 未対応の %q", l.Format)
 	}
 	return nil
+}
+
+func (a *CAAdmin) complete() error {
+	if a.Listen == "" {
+		return nil
+	}
+	if len(a.AllowedClients) == 0 {
+		return errors.New("admin.allowed_clients は必須（管理画面に入れる管理者の証明書の名前を指定する）")
+	}
+	for i, p := range a.AllowedClients {
+		p = names.Normalize(p)
+		if err := names.ValidatePattern(p); err != nil {
+			return fmt.Errorf("admin.allowed_clients: %w", err)
+		}
+		a.AllowedClients[i] = p
+	}
+	var err error
+	if a.allowedPrefixes, err = parsePrefixes("admin.allowed_cidrs", a.AllowedCIDRs); err != nil {
+		return err
+	}
+	if a.LogBuffer == 0 {
+		a.LogBuffer = 5000
+	}
+	if a.LogBuffer < 100 || a.LogBuffer > 100000 {
+		return errors.New("admin.log_buffer は 100〜100000")
+	}
+	return nil
+}
+
+// parsePrefixes は CIDR または IP アドレスの一覧を解釈する。
+func parsePrefixes(key string, list []string) ([]netip.Prefix, error) {
+	var out []netip.Prefix
+	for _, s := range list {
+		p, err := netip.ParsePrefix(s)
+		if err != nil {
+			a, aerr := netip.ParseAddr(s)
+			if aerr != nil {
+				return nil, fmt.Errorf("%s: %q を解釈できない", key, s)
+			}
+			p = netip.PrefixFrom(a, a.BitLen())
+		}
+		out = append(out, p.Masked())
+	}
+	return out, nil
 }

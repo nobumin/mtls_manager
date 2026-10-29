@@ -32,6 +32,10 @@ Tests verify that the bundled `examples/ca.example.yaml` and `examples/agent.exa
 | `crl.validity` | `"24h"` | CRL lifetime (`NextUpdate`). Regenerated after half the lifetime or when a certificate is revoked |
 | `log.level` | `"info"` | `debug` / `info` / `warn` / `error` |
 | `log.format` | `"text"` | `text` / `json` |
+| `admin.listen` | (empty = disabled) | Listen address of the admin web UI (read-only). Use a port separate from ACME, bound to localhost or an admin-subnet address (e.g. `"127.0.0.1:9443"`) |
+| `admin.allowed_clients` | (required when `admin.listen` is set) | Name patterns of admin certificates allowed in. Login is mTLS with client certificates issued by this CA; no passwords |
+| `admin.allowed_cidrs` | `[]` (no restriction) | Sources allowed to connect. A warning is logged at startup if empty while listening on a non-loopback address |
+| `admin.log_buffer` | `5000` | Number of recent log entries viewable in the UI (100–100000). Kept in memory, since startup only |
 
 ### Endpoints
 
@@ -40,6 +44,17 @@ Tests verify that the bundled `examples/ca.example.yaml` and `examples/agent.exa
 | `/acme/directory` | ACME directory (configure clients with this URL) |
 | `/crl` | CRL signed by the intermediate (DER) |
 | `/healthz` | Health check (returns `ok`) |
+
+The admin UI (`admin.listen`) runs on a separate port and shows the following pages.
+
+| Path | Contents |
+| --- | --- |
+| `/` | Overview (CA certificate expiry, counts, warnings) |
+| `/certs` | Issued certificates |
+| `/eab` | EAB keys |
+| `/logs` | Logs |
+
+It is read-only and never shows secrets such as keys or HMACs. See the [operations design guide](operations-design.md#9-admin-web-ui) for usage.
 
 ### Administrative subcommands
 

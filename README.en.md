@@ -26,6 +26,7 @@ you need your own CA. mtls_manager aims to make in-house mTLS as easy to operate
   - Access to the CA can be restricted by source IP. Services refuse to start if private key files are not 0600.
 - **Easy to integrate**: the Go library (`mtls` package) adds hot certificate reloading and a peer-name allowlist in a few lines.
   It also works with existing software such as nginx and curl.
+- **Admin web UI (read-only)**: view the overview, issued certificates, EAB keys and logs in a browser. Login is mTLS with certificates issued by this CA, and every access is audit-logged.
 - **Linux first, macOS supported**: example systemd units and launchd jobs are included.
 
 ## Architecture
@@ -49,7 +50,7 @@ you need your own CA. mtls_manager aims to make in-house mTLS as easy to operate
 | Command | Role |
 | --- | --- |
 | `mtlsctl` | Creates the root and intermediate CAs and manages EAB keys (per-server issuance permission) |
-| `mtls-ca` | ACME server that issues certificates with the intermediate CA; also lists and revokes issued certificates |
+| `mtls-ca` | ACME server that issues certificates with the intermediate CA, with a read-only admin web UI; also lists and revokes issued certificates |
 | `mtls-agent` | Runs on each server, obtains a certificate and renews it before it expires |
 | `mtls` (Go package) | Library for adding mTLS to Go applications |
 
@@ -84,6 +85,7 @@ Follow the [getting started guide](docs/en/getting-started.md):
 | [Getting started](docs/en/getting-started.md) | From building the CA to integrating applications |
 | [Configuration reference](docs/en/configuration.md) | Settings for `mtls-ca` and `mtls-agent` |
 | [Operations guide](docs/en/operations.md) | Adding/removing servers, revocation, intermediate rotation, backup, monitoring, troubleshooting |
+| [Operations design guide (detailed)](docs/en/operations-design.md) | Network design, what is automated, admin UI, monitoring, failure and incident response, backup, pre-deployment checklist |
 | [Security design](docs/en/security.md) | Threat model, what is and is not protected, recommendations |
 | [SECURITY.md](SECURITY.md) | How to report vulnerabilities |
 

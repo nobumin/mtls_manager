@@ -57,4 +57,5 @@
 | `docs/*/getting-started.md` | 導入手順 |
 | `docs/*/configuration.md` | 設定項目（`examples/*.example.yaml` とも合わせる） |
 | `docs/*/operations.md` | 運用手順 |
+| `docs/*/operations-design.md` | 運用設計（ネットワーク、自動化の範囲、管理画面、監視、障害・事故への対応） |
 | `docs/*/security.md` | セキュリティ設計（守れること・守れないこと） |

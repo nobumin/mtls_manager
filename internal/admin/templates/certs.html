@@ -1,0 +1,18 @@
+{{define "content"}}{{with .Data}}
+<form class="filter" method="get" action="/certs">
+  <input type="search" name="q" value="{{.Query}}" placeholder="名前・シリアル・EAB 鍵のメモで絞り込み">
+  <label><input type="checkbox" name="all" value="1" {{if .All}}checked{{end}}> 期限切れも表示</label>
+  <button type="submit">絞り込む</button>
+</form>
+<p class="muted">{{.Total}} 件{{if .Truncated}}（新しい順に 1000 件まで表示）{{end}}。期限切れから 7 日を過ぎた記録は自動で消える。</p>
+<table>
+  <thead><tr><th>名前</th><th>状態</th><th>発行</th><th>有効期限</th><th>EAB 鍵</th><th>シリアル</th></tr></thead>
+  <tbody>
+  {{range .Rows}}
+    <tr><td>{{join .Names ", "}}</td><td><span class="badge {{.StatusCSS}}">{{.Status}}</span></td><td>{{fmtTime .Issued}}</td><td>{{fmtTime .NotAfter}}</td><td>{{.EABNote}}</td><td class="mono">{{.Serial}}</td></tr>
+  {{else}}
+    <tr><td colspan="6" class="muted">該当する証明書はない</td></tr>
+  {{end}}
+  </tbody>
+</table>
+{{end}}{{end}}

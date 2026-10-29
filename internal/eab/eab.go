@@ -209,3 +209,18 @@ func Update(path string, fn func(*File) error) error {
 	}
 	return f.Save(path)
 }
+
+// Keys は現在の鍵を作成日時の順に返す（管理画面用）。ファイルが変わっていれば読み直す。
+func (s *Store) Keys() ([]Key, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.reloadLocked(); err != nil {
+		return nil, err
+	}
+	out := make([]Key, 0, len(s.keys))
+	for _, k := range s.keys {
+		out = append(out, k)
+	}
+	slices.SortFunc(out, func(a, b Key) int { return a.CreatedAt.Compare(b.CreatedAt) })
+	return out, nil
+}

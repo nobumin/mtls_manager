@@ -93,6 +93,8 @@ EAB 鍵に許可された名前の範囲内なら、mtls-agent の設定の `nam
 
 ## 監視
 
+- 管理画面（`admin.listen`）を有効にすると、CA の証明書の期限・更新の遅れ・直近のログをブラウザで確認できます
+  （[運用設計ガイド](operations-design.md#9-管理画面)）。
 - `mtls-agent check -config ...` は、更新が必要なとき（期限切れ・更新の遅れ・名前の不一致など）に**終了コード 1** を返します。
   監視システムから定期的に実行してください。
 - `https://ca.internal.example.com:8443/healthz` で CA の死活を確かめられます。

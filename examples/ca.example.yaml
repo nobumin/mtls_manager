@@ -55,3 +55,19 @@ crl:
 log:
   level: "info"  # debug / info / warn / error
   format: "text" # text / json
+
+# 管理画面（閲覧用の Web 画面）。listen を指定すると有効になる。
+# Admin web UI (read-only). Enabled when listen is set.
+# admin:
+#   # ACME とは別のポート。localhost か管理用のサブネットのアドレスで待ち受ける
+#   # A port separate from ACME, bound to localhost or an admin-subnet address
+#   listen: "127.0.0.1:9443"
+#   # 管理画面に入れる管理者の証明書の名前（この CA が発行したクライアント証明書で mTLS ログイン）
+#   # Names of admin client certificates (mTLS login with certificates issued by this CA)
+#   allowed_clients:
+#     - "admin1.internal.example.com"
+#   # 管理画面に接続できる送信元 / Source addresses allowed to connect
+#   allowed_cidrs:
+#     - "10.0.100.0/24"
+#   # 画面で閲覧できる直近のログの件数 / Number of recent log entries viewable in the UI
+#   log_buffer: 5000
