@@ -1,6 +1,6 @@
 //go:build unix
 
-package eab
+package flock
 
 import (
 	"os"
@@ -14,17 +14,16 @@ func TestLockFileIsReadableByOthers(t *testing.T) {
 	old := syscall.Umask(0o077)
 	defer syscall.Umask(old)
 	path := filepath.Join(t.TempDir(), "eab.json")
-	if err := Update(path, func(f *File) error { _, err := f.Add([]string{"web1.example.com"}, ""); return err }); err != nil {
+	unlock, err := Lock(path)
+	if err != nil {
 		t.Fatal(err)
 	}
+	unlock()
 	fi, err := os.Stat(path + ".lock")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if fi.Mode().Perm() != 0o644 {
 		t.Fatalf("ロックファイルの権限 = %o", fi.Mode().Perm())
-	}
-	if fi, _ := os.Stat(path); fi.Mode().Perm() != 0o600 {
-		t.Fatalf("鍵ファイルの権限 = %o", fi.Mode().Perm())
 	}
 }

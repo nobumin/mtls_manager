@@ -108,3 +108,14 @@ func TestAdminNameHelpers(t *testing.T) {
 		t.Errorf("重ならないのに検出した: %v", got)
 	}
 }
+
+// 鍵ファイルは 0600 で書く（ロックファイルの権限は flock パッケージで確かめる）。
+func TestUpdateWritesPrivateFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "eab.json")
+	if err := Update(path, func(f *File) error { _, err := f.Add([]string{"web1.example.com"}, ""); return err }); err != nil {
+		t.Fatal(err)
+	}
+	if fi, _ := os.Stat(path); fi.Mode().Perm() != 0o600 {
+		t.Fatalf("鍵ファイルの権限 = %o", fi.Mode().Perm())
+	}
+}

@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nobumin/mtls_manager/internal/flock"
 	"github.com/nobumin/mtls_manager/internal/names"
 	"github.com/nobumin/mtls_manager/internal/pki"
 )
@@ -196,7 +197,7 @@ func (s *Store) reloadLocked() error {
 // Update は鍵ファイルを排他ロックの下で読み、fn で変更して書き戻す（無ければ空から作る）。
 // mtlsctl eab create / revoke を同時に実行しても、一方の変更（鍵の取り消しなど）が失われない。
 func Update(path string, fn func(*File) error) error {
-	unlock, err := lockFile(path)
+	unlock, err := flock.Lock(path)
 	if err != nil {
 		return fmt.Errorf("%s をロックできない: %w", path, err)
 	}
