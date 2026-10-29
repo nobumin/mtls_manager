@@ -4,6 +4,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"math/big"
 	"os"
 	"slices"
 	"strings"
@@ -56,6 +57,9 @@ func listCerts(args []string) error {
 	for _, c := range certs {
 		status := "有効"
 		switch {
+		case c.Pending && !c.Revoked:
+			// 署名の前に記録したまま完了しなかったもの。外に出ていない可能性が高いが、必要なら失効できる。
+			status = "未完了"
 		case c.Revoked:
 			status = "失効 " + c.RevokedAt.Local().Format("2006-01-02 15:04")
 		case !now.Before(c.NotAfter):
@@ -83,17 +87,13 @@ func revokeCert(args []string) error {
 	if serial == "" {
 		return errors.New("-serial は必須")
 	}
-	if !slices.Contains([]int{0, 1, 3, 4, 5}, reason) {
-		return fmt.Errorf("失効理由 %d は指定できない", reason)
+	// openssl の表示（コロン区切り・先頭の 0）でも受け付けるよう、数値として読み直して保存時の書式にそろえる。
+	n, ok := new(big.Int).SetString(strings.TrimPrefix(strings.ReplaceAll(strings.ToLower(serial), ":", ""), "0x"), 16)
+	if !ok {
+		return fmt.Errorf("シリアル %q を 16 進として解釈できない", serial)
 	}
-	serial = strings.ToLower(strings.TrimPrefix(strings.ReplaceAll(serial, ":", ""), "0x"))
-	_, err = db.UpdateCert(serial, func(c *store.Cert) error {
-		if c.Revoked {
-			return errors.New("すでに失効している")
-		}
-		c.Revoked, c.RevokedAt, c.Reason = true, time.Now().UTC(), reason
-		return nil
-	})
+	serial = fmt.Sprintf("%x", n)
+	err = db.RevokeCert(serial, reason, nil)
 	if errors.Is(err, store.ErrNotFound) {
 		return fmt.Errorf("シリアル %s の証明書が見つからない", serial)
 	}

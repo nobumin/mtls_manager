@@ -40,7 +40,12 @@ func (s *SelfCert) renewLocked() error {
 	if err != nil {
 		return err
 	}
-	leaf, err := s.issuer.IssueLeaf(key.Public(), s.names, s.validity)
+	// 中間 CA の期限を越えないよう、残りの期間に合わせて短くする（IssueLeaf の「半分を下回ると拒否」に掛からない）。
+	validity := min(s.validity, time.Until(s.issuer.Cert.NotAfter))
+	if validity <= 0 {
+		return pki.ErrIssuerExpiring
+	}
+	leaf, err := s.issuer.IssueLeaf(key.Public(), s.names, validity)
 	if err != nil {
 		return err
 	}

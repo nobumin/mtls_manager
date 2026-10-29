@@ -22,8 +22,8 @@ Tests verify that the bundled `examples/ca.example.yaml` and `examples/agent.exa
 | `allowed_client_cidrs` | `[]` (no restriction) | Sources allowed to connect (CIDRs or IP addresses). Checked against the TCP peer; `X-Forwarded-For` is ignored |
 | `policy.allowed_domains` | (required) | Domains that may be issued (the domain and its subdomains). Must be within the intermediate's name constraints |
 | `policy.max_names_per_order` | `10` | Maximum names per certificate (1–100) |
-| `cert.validity` | `"24h"` | Lifetime of issued certificates (10m–90d) |
-| `challenge.types` | `["http-01", "tls-alpn-01"]` | Accepted validation methods |
+| `cert.validity` | `"24h"` | Lifetime of issued certificates (10m–90d). Capped at the intermediate's expiry; if the capped lifetime would be less than half of this value, issuance is refused (a signal to rotate the intermediate) |
+| `challenge.types` | `["http-01", "tls-alpn-01"]` | Accepted validation methods (duplicates are an error) |
 | `challenge.http01_port` | `80` | Port used for http-01 |
 | `challenge.tlsalpn01_port` | `443` | Port used for tls-alpn-01 |
 | `challenge.resolver` | (OS resolver) | DNS server for validation lookups (`"10.0.0.2:53"`) |
@@ -46,7 +46,7 @@ Tests verify that the bundled `examples/ca.example.yaml` and `examples/agent.exa
 These open the database directly, so **stop mtls-ca first**.
 
 ```sh
-mtls-ca certs  -config /etc/mtls-ca/config.yaml [-all]               # list issued certificates
+mtls-ca certs  -config /etc/mtls-ca/config.yaml [-all]               # list issued certificates (status: valid, revoked, expired, incomplete)
 mtls-ca revoke -config /etc/mtls-ca/config.yaml -serial <hex> [-reason 1]
 ```
 
@@ -56,7 +56,7 @@ mtls-ca revoke -config /etc/mtls-ca/config.yaml -serial <hex> [-reason 1]
 | --- | --- | --- |
 | `ca_url` | (required) | ACME directory URL (`https://.../acme/directory`) |
 | `ca_root` | (required) | Root CA certificate, used to verify the CA connection and issued certificates. During a root rotation the file may contain both the old and new roots |
-| `account_key` | (required) | ACME account key, created on first run (0600) |
+| `account_key` | (required) | ACME account key, created on first run (0600). Internal state `state.json` (time of issuance and intermediate CA, 0600) is kept in the same directory |
 | `eab.kid` | | kid printed by `mtlsctl eab create`; used only for the first registration |
 | `eab.hmac_file` | | HMAC key file (**must be 0600**). Can also be given via the `MTLS_AGENT_EAB_HMAC` environment variable. Not needed after registration |
 | `names` | (required) | Names (FQDNs) on the certificate. Must be allowed by the EAB key |

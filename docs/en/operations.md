@@ -35,6 +35,9 @@ sudo systemctl start mtls-ca
 
 Revocations are published in the CRL (`https://ca.internal.example.com:8443/crl`).
 
+Entries that `certs` shows as `未完了` (incomplete) are serials recorded before signing whose issuance did not complete
+(e.g. the CA stopped or the disk failed). They were never returned to a client, so exposure is unlikely, but you can revoke them to be safe.
+
 > **Note**: in v0.x neither the `mtls` library nor `mtls-agent` checks the CRL. Revocation only affects software configured to
 > read the CRL (e.g. nginx `ssl_crl`). mtls_manager is designed around **short lifetimes** (24 hours by default) instead of revocation.
 > In urgent cases, also consider removing the peer from the applications' allowlists (`AllowedPeers`).
@@ -49,7 +52,9 @@ For names outside the key's permission, create a new EAB key, delete mtls-agent'
 
 ## Rotating the intermediate CA (before it expires)
 
-The intermediate's default validity is 2 years. mtls-ca logs a warning at startup when fewer than 30 days remain.
+The intermediate's default validity is 2 years. mtls-ca logs a warning at startup and daily when fewer than 30 days remain.
+Once less than half of the certificate lifetime (`cert.validity`) remains, it **refuses to issue** rather than handing out
+ever-shorter certificates (which would make every server re-issue constantly). Rotate before then.
 Since the root CA is unchanged, **no work is needed on the servers**.
 
 1. On the CA server, create a new key and CSR in a separate directory.
@@ -100,6 +105,8 @@ Backups contain private keys. Encrypt them and restrict access.
   | `許可されていない送信元からの接続を拒否` (mtls-ca) | Connection from outside `allowed_client_cidrs` |
   | `証明書を取得できない（再試行する）` (mtls-agent) | Issuance failed; the reason follows |
   | `更新後のコマンドが失敗した` (mtls-agent) | Certificate renewed, but `hooks.post_renew` failed |
+  | `取得した直後なのに更新が必要と判断された` (mtls-agent) | Something is wrong with the configuration or the CA; the agent waits instead of re-issuing in a loop. The reason follows |
+  | `中間 CA の有効期限が近い` (mtls-ca) | Rotate the intermediate ([procedure](#rotating-the-intermediate-ca-before-it-expires)) |
 
 ## Troubleshooting
 

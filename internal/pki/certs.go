@@ -258,9 +258,31 @@ func (i *Issuer) Permits(name string) bool {
 	return len(i.Cert.PermittedDNSDomains) == 0 || names.WithinAnyDomain(i.Cert.PermittedDNSDomains, name)
 }
 
-// IssueLeaf はサーバ認証・クライアント認証の両方に使える末端の証明書を発行する。
+// ErrIssuerExpiring は中間 CA の残りの有効期間が短すぎて、発行を拒否したことを表す。
+var ErrIssuerExpiring = errors.New("中間 CA の有効期限が近く、証明書の有効期間を確保できない（中間 CA を更新すること）")
+
+// LeafNotAfter は validity で発行したときの NotAfter（中間 CA の期限で切り詰めたもの）を返す。
+func (i *Issuer) LeafNotAfter(now time.Time, validity time.Duration) time.Time {
+	if notAfter := now.Add(validity); notAfter.Before(i.Cert.NotAfter) {
+		return notAfter
+	}
+	return i.Cert.NotAfter
+}
+
+// IssueLeaf はサーバ認証・クライアント認証の両方に使える末端の証明書を、ランダムなシリアルで発行する。
 // dnsNames は検証済み・正規化済みであること。
 func (i *Issuer) IssueLeaf(pub crypto.PublicKey, dnsNames []string, validity time.Duration) (*x509.Certificate, error) {
+	serial, err := RandomSerial()
+	if err != nil {
+		return nil, err
+	}
+	return i.IssueLeafWithSerial(serial, pub, dnsNames, validity)
+}
+
+// IssueLeafWithSerial は指定のシリアルで発行する（発行前にシリアルを記録しておくため）。
+// 中間 CA の期限で切り詰めた結果、有効期間が validity の半分を下回る場合は ErrIssuerExpiring を返す
+// （短い証明書を全サーバが取り直し続けるのを防ぐ）。
+func (i *Issuer) IssueLeafWithSerial(serial *big.Int, pub crypto.PublicKey, dnsNames []string, validity time.Duration) (*x509.Certificate, error) {
 	if len(dnsNames) == 0 {
 		return nil, errors.New("名前が空")
 	}
@@ -272,14 +294,10 @@ func (i *Issuer) IssueLeaf(pub crypto.PublicKey, dnsNames []string, validity tim
 			return nil, fmt.Errorf("%q は中間 CA の名前制約 %v の範囲外", n, i.Cert.PermittedDNSDomains)
 		}
 	}
-	serial, err := RandomSerial()
-	if err != nil {
-		return nil, err
-	}
 	now := time.Now()
-	notAfter := now.Add(validity)
-	if notAfter.After(i.Cert.NotAfter) {
-		notAfter = i.Cert.NotAfter
+	notAfter := i.LeafNotAfter(now, validity)
+	if notAfter.Sub(now) < validity/2 {
+		return nil, ErrIssuerExpiring
 	}
 	ku := x509.KeyUsageDigitalSignature
 	if _, ok := pub.(*rsa.PublicKey); ok {

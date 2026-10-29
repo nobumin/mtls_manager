@@ -191,3 +191,21 @@ func (s *Store) reloadLocked() error {
 	s.keys, s.modTime, s.size = keys, fi.ModTime(), fi.Size()
 	return nil
 }
+
+// Update は鍵ファイルを排他ロックの下で読み、fn で変更して書き戻す（無ければ空から作る）。
+// mtlsctl eab create / revoke を同時に実行しても、一方の変更（鍵の取り消しなど）が失われない。
+func Update(path string, fn func(*File) error) error {
+	unlock, err := lockFile(path)
+	if err != nil {
+		return fmt.Errorf("%s をロックできない: %w", path, err)
+	}
+	defer unlock()
+	f, err := LoadOrEmpty(path)
+	if err != nil {
+		return err
+	}
+	if err := fn(f); err != nil {
+		return err
+	}
+	return f.Save(path)
+}

@@ -93,9 +93,10 @@ func (a *Agent) Check(now time.Time) Status {
 		return Status{Reason: "証明書が無い、または読めない"}
 	}
 	leaf := certs[0]
+	saved := a.loadState()
 	st := Status{
-		Exists: true, Names: leaf.DNSNames, Serial: fmt.Sprintf("%x", leaf.SerialNumber), NotAfter: leaf.NotAfter,
-		RenewAt: leaf.NotBefore.Add(time.Duration(float64(leaf.NotAfter.Sub(leaf.NotBefore)) * a.cfg.Renew.Fraction)),
+		Exists: true, Names: leaf.DNSNames, Serial: serialHex(leaf), NotAfter: leaf.NotAfter,
+		RenewAt: renewAt(leaf, saved, a.cfg.Renew.Fraction),
 	}
 	key, err := pki.LoadPrivateKey(a.cfg.Output.Key)
 	if err != nil && a.cfg.Output.KeyFileMode() != 0o600 {
@@ -109,7 +110,7 @@ func (a *Agent) Check(now time.Time) Status {
 		st.Reason = "証明書と秘密鍵が対応していない"
 	case !slices.Equal(normalized(leaf.DNSNames), a.cfg.Names):
 		st.Reason = fmt.Sprintf("名前が設定と違う（証明書 %v、設定 %v）", leaf.DNSNames, a.cfg.Names)
-	case a.verifyChain(leaf, a.intermediates()) != nil:
+	case a.verifyChain(leaf, a.intermediates(saved)) != nil:
 		st.Reason = "ルート CA につながらない（CA が変わった可能性）"
 	case !now.Before(leaf.NotAfter):
 		st.Reason = "有効期限が切れている"
@@ -136,20 +137,39 @@ func normalized(list []string) []string {
 	return slices.Compact(out)
 }
 
-// intermediates は出力済みの中間 CA を読む（chain → fullchain の順に探す）。
-func (a *Agent) intermediates() []*x509.Certificate {
+// intermediates はチェーンの検証に使う中間 CA を集める。内部状態（state.json）に保存したものを必ず含めるので、
+// chain / fullchain を出力しない設定でも検証できる（出力済みのファイルにあるものも加える）。
+func (a *Agent) intermediates(saved *state) []*x509.Certificate {
+	var out []*x509.Certificate
+	if saved != nil && saved.IntermediatesPEM != "" {
+		if c, err := pki.ParseCertsPEM([]byte(saved.IntermediatesPEM)); err == nil {
+			out = append(out, c...)
+		}
+	}
 	if a.cfg.Output.Chain != "" {
 		if c, err := pki.LoadCerts(a.cfg.Output.Chain); err == nil {
-			return c
+			out = append(out, c...)
 		}
 	}
 	if a.cfg.Output.Fullchain != "" {
 		if c, err := pki.LoadCerts(a.cfg.Output.Fullchain); err == nil && len(c) > 1 {
-			return c[1:]
+			out = append(out, c[1:]...)
 		}
 	}
-	return nil
+	return out
 }
+
+// renewAt は更新時期を返す。取得した時刻が分かれば、そこから有効期間の fraction を数える
+// （CA は NotBefore を過去にずらすので、NotBefore から数えると、有効期間が短いときに発行直後から更新時期を過ぎてしまう）。
+func renewAt(leaf *x509.Certificate, saved *state, fraction float64) time.Time {
+	start := leaf.NotBefore
+	if saved != nil && saved.Serial == serialHex(leaf) && saved.ObtainedAt.After(start) && saved.ObtainedAt.Before(leaf.NotAfter) {
+		start = saved.ObtainedAt
+	}
+	return start.Add(time.Duration(float64(leaf.NotAfter.Sub(start)) * fraction))
+}
+
+func serialHex(c *x509.Certificate) string { return fmt.Sprintf("%x", c.SerialNumber) }
 
 func (a *Agent) verifyChain(leaf *x509.Certificate, inters []*x509.Certificate) error {
 	ipool := x509.NewCertPool()
@@ -243,9 +263,19 @@ func (a *Agent) eabHMAC() ([]byte, error) {
 }
 
 // Obtain は証明書を取得してファイルに書き、更新後のコマンドを実行する。
-func (a *Agent) Obtain(ctx context.Context) error {
+func (a *Agent) Obtain(ctx context.Context) (err error) {
 	ctx, cancel := context.WithTimeout(ctx, a.cfg.Renew.Timeout.D())
 	defer cancel()
+	defer func() {
+		if needsReregistration(err) {
+			// CA 側でアカウントが失われた（データベースを古いバックアップから戻した等）。
+			// 使い回しのクライアントを捨て、次の試行で EAB による再登録からやり直す。
+			a.log.Warn("CA がアカウントを受け付けない。次の試行でアカウントを確認し直す", "err", err)
+			a.mu.Lock()
+			a.client = nil
+			a.mu.Unlock()
+		}
+	}()
 	c, err := a.acmeClient(ctx)
 	if err != nil {
 		return err
@@ -316,10 +346,14 @@ func (a *Agent) Obtain(ctx context.Context) error {
 	if err := a.checkIssued(chain, key); err != nil {
 		return fmt.Errorf("発行された証明書が想定と違う: %w", err)
 	}
+	// 内部状態を先に保存する（失敗したら出力を書き換えずにやり直す）。
+	if err := a.saveState(chain[0], chain[1:], time.Now()); err != nil {
+		return fmt.Errorf("内部状態を保存できない: %w", err)
+	}
 	if err := a.write(chain, key); err != nil {
 		return fmt.Errorf("証明書を書き出せない: %w", err)
 	}
-	a.log.Info("証明書を更新した", "names", a.cfg.Names, "serial", fmt.Sprintf("%x", chain[0].SerialNumber), "not_after", chain[0].NotAfter)
+	a.log.Info("証明書を更新した", "names", a.cfg.Names, "serial", serialHex(chain[0]), "not_after", chain[0].NotAfter)
 	a.runHook(ctx)
 	return nil
 }
@@ -404,6 +438,9 @@ func truncate(s string, n int) string {
 	return s
 }
 
+// minWaitAfterObtain は、取得した直後に更新が必要と判断されたときに、次に確かめるまでの最短の待ち時間。
+const minWaitAfterObtain = time.Minute
+
 // Run は ctx が終わるまで、状態の確認と更新を繰り返す。renewNow に値が届くと、時期を問わず更新する。
 func (a *Agent) Run(ctx context.Context, renewNow <-chan struct{}) {
 	const minBackoff, maxBackoff = 30 * time.Second, 15 * time.Minute
@@ -427,7 +464,15 @@ func (a *Agent) Run(ctx context.Context, renewNow <-chan struct{}) {
 				backoff = min(backoff*2, maxBackoff)
 			} else {
 				force, backoff = false, minBackoff
-				continue
+				// 安全弁: 取得した直後なのに、まだ更新が必要と判断される場合（設定や CA の状態の不具合）は、
+				// 取得を繰り返さず、間を置いてから確かめ直す。
+				if after := a.Check(time.Now()); after.NeedsRenewal() {
+					wait = max(a.cfg.Renew.CheckInterval.D(), minWaitAfterObtain)
+					a.log.Warn("取得した直後なのに更新が必要と判断された。設定と CA の状態を確認すること",
+						"reason", after.Reason, "retry_in", wait)
+				} else {
+					continue
+				}
 			}
 		} else {
 			wait = min(a.cfg.Renew.CheckInterval.D(), time.Until(st.RenewAt))
@@ -453,4 +498,17 @@ func jitter(d time.Duration) time.Duration {
 		return d
 	}
 	return d - d/5 + time.Duration(n.Int64())
+}
+
+// needsReregistration は、アカウントを確認し直すべきエラー（CA がアカウントを知らない・受け付けない）かを返す。
+func needsReregistration(err error) bool {
+	var ae *acme.Error
+	if !errors.As(err, &ae) {
+		return false
+	}
+	switch ae.ProblemType {
+	case "urn:ietf:params:acme:error:accountDoesNotExist", "urn:ietf:params:acme:error:unauthorized":
+		return true
+	}
+	return false
 }

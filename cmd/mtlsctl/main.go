@@ -273,20 +273,18 @@ func eabCreate(args []string) error {
 	if err := required("file", *file); err != nil {
 		return err
 	}
-	f, err := eab.LoadOrEmpty(*file)
-	if err != nil {
-		return err
-	}
-	k, err := f.Add(patterns, *note)
-	if err != nil {
-		return err
-	}
-	if *hmacOut != "" {
-		if err := pki.WriteNewFile(*hmacOut, []byte(k.HMAC+"\n"), 0o600); err != nil {
+	// 同時に実行された create / revoke の変更を失わないよう、ロックの下で読み書きする。
+	var k eab.Key
+	if err := eab.Update(*file, func(f *eab.File) error {
+		var err error
+		if k, err = f.Add(patterns, *note); err != nil {
 			return err
 		}
-	}
-	if err := f.Save(*file); err != nil {
+		if *hmacOut != "" {
+			return pki.WriteNewFile(*hmacOut, []byte(k.HMAC+"\n"), 0o600)
+		}
+		return nil
+	}); err != nil {
 		return err
 	}
 	fmt.Printf("EAB 鍵を作成した\n  kid:   %s\n  names: %v\n", k.KID, k.Names)
@@ -331,14 +329,12 @@ func eabRevoke(args []string) error {
 	if err := required("file", *file, "kid", *kid); err != nil {
 		return err
 	}
-	f, err := eab.Load(*file)
-	if err != nil {
-		return err
-	}
-	if !f.Remove(*kid) {
-		return fmt.Errorf("kid %s が見つからない", *kid)
-	}
-	if err := f.Save(*file); err != nil {
+	if err := eab.Update(*file, func(f *eab.File) error {
+		if !f.Remove(*kid) {
+			return fmt.Errorf("kid %s が見つからない", *kid)
+		}
+		return nil
+	}); err != nil {
 		return err
 	}
 	fmt.Printf("EAB 鍵 %s を取り消した。この鍵で登録したサーバは、以後新しい証明書を取得できない\n（発行済みの証明書は有効期限まで使える。すぐに止めるには失効させる）\n", *kid)

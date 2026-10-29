@@ -214,7 +214,7 @@ func NewIssuer(t testing.TB, permitted ...string) *pki.Issuer {
 	if err != nil {
 		t.Fatal(err)
 	}
-	root, err := pki.CreateRoot(rootKey, pki.RootOptions{CommonName: "Test Root", Validity: 24 * time.Hour})
+	root, err := pki.CreateRoot(rootKey, pki.RootOptions{CommonName: "Test Root", Validity: 7 * 24 * time.Hour})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +230,7 @@ func NewIssuer(t testing.TB, permitted ...string) *pki.Issuer {
 	if err != nil {
 		t.Fatal(err)
 	}
-	inter, err := pki.SignIntermediate(root, rootKey, csr, pki.IntermediateOptions{Validity: 12 * time.Hour, PermittedDomains: permitted})
+	inter, err := pki.SignIntermediate(root, rootKey, csr, pki.IntermediateOptions{Validity: 3 * 24 * time.Hour, PermittedDomains: permitted})
 	if err != nil {
 		t.Fatal(err)
 	}

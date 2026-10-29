@@ -22,8 +22,8 @@
 | `allowed_client_cidrs` | `[]`（制限なし） | CA に接続できる送信元（CIDR または IP アドレス）。TCP の接続元で判定し、`X-Forwarded-For` は見ない |
 | `policy.allowed_domains` | （必須） | 発行してよいドメイン（そのドメイン自身とサブドメイン）。中間 CA の名前制約の範囲内であること |
 | `policy.max_names_per_order` | `10` | 1 枚の証明書に載せられる名前の上限（1〜100） |
-| `cert.validity` | `"24h"` | 発行する証明書の有効期間（10m〜90d） |
-| `challenge.types` | `["http-01", "tls-alpn-01"]` | 受け付ける所有確認の方式 |
+| `cert.validity` | `"24h"` | 発行する証明書の有効期間（10m〜90d）。中間 CA の期限で切り詰められる。切り詰めた結果がこの値の半分を下回る場合は発行を拒否する（中間 CA を更新する合図） |
+| `challenge.types` | `["http-01", "tls-alpn-01"]` | 受け付ける所有確認の方式（重複はエラー） |
 | `challenge.http01_port` | `80` | http-01 で接続するポート |
 | `challenge.tlsalpn01_port` | `443` | tls-alpn-01 で接続するポート |
 | `challenge.resolver` | （OS の設定） | 所有確認の名前解決に使う DNS サーバ（`"10.0.0.2:53"`） |
@@ -46,7 +46,7 @@
 データベースを直接開くので、**mtls-ca を止めてから**実行します。
 
 ```sh
-mtls-ca certs  -config /etc/mtls-ca/config.yaml [-all]               # 発行済みの証明書の一覧
+mtls-ca certs  -config /etc/mtls-ca/config.yaml [-all]               # 発行済みの証明書の一覧（状態: 有効・失効・期限切れ・未完了）
 mtls-ca revoke -config /etc/mtls-ca/config.yaml -serial <16進> [-reason 1]
 ```
 
@@ -56,7 +56,7 @@ mtls-ca revoke -config /etc/mtls-ca/config.yaml -serial <16進> [-reason 1]
 | --- | --- | --- |
 | `ca_url` | （必須） | ACME ディレクトリの URL（`https://.../acme/directory`） |
 | `ca_root` | （必須） | ルート CA の証明書。CA への接続と、発行された証明書の検証に使う。ルート CA の入れ替え中は新旧を 1 つのファイルに並べてよい |
-| `account_key` | （必須） | ACME アカウントの鍵。無ければ初回に作る（0600） |
+| `account_key` | （必須） | ACME アカウントの鍵。無ければ初回に作る（0600）。同じディレクトリに内部状態 `state.json`（取得した時刻と中間 CA。0600）を置く |
 | `eab.kid` | | `mtlsctl eab create` が表示する kid。初回の登録にだけ使う |
 | `eab.hmac_file` | | HMAC 鍵のファイル（**0600 必須**）。環境変数 `MTLS_AGENT_EAB_HMAC` でも渡せる。初回の登録後は不要 |
 | `names` | （必須） | 証明書に載せる名前（FQDN）。EAB 鍵で許可された名前であること |

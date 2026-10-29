@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
 	bolt "go.etcd.io/bbolt"
@@ -92,6 +93,9 @@ type Cert struct {
 	NotBefore time.Time `json:"not_before"`
 	NotAfter  time.Time `json:"not_after"`
 	ChainPEM  []byte    `json:"chain_pem"` // 末端 + 中間 CA
+	// Pending は署名の前に記録しただけで、まだ発行を完了していないことを表す（ReserveCert）。
+	// 署名後にプロセスが落ちても、このシリアルは一覧・失効・CRL の対象になる。
+	Pending   bool      `json:"pending,omitempty"`
 	Revoked   bool      `json:"revoked,omitempty"`
 	RevokedAt time.Time `json:"revoked_at,omitzero"`
 	Reason    int       `json:"reason,omitempty"`
@@ -260,8 +264,32 @@ func (d *DB) UpdateAuthz(id string, fn func(*Authz) error) (*Authz, error) {
 	return update(d, bucketAuthzs, id, fn)
 }
 
+// ReserveCert は署名の前に、これから発行する証明書のシリアルを記録する。
+// 署名した後で FinalizeOrder が失敗しても（プロセスが落ちても）、発行したものを必ず失効できるようにする。
+func (d *DB) ReserveCert(c *Cert) error {
+	c.Pending = true
+	return d.bolt.Update(func(tx *bolt.Tx) error {
+		if tx.Bucket(bucketCerts).Get([]byte(c.Serial)) != nil {
+			return fmt.Errorf("シリアル %s はすでに使われている", c.Serial)
+		}
+		return put(tx, bucketCerts, c.Serial, c)
+	})
+}
+
+// DeleteReservedCert は署名に失敗した予約を消す（完了したものは消さない）。
+func (d *DB) DeleteReservedCert(serial string) error {
+	return d.bolt.Update(func(tx *bolt.Tx) error {
+		c, err := get[Cert](tx, bucketCerts, serial)
+		if err != nil || !c.Pending {
+			return err
+		}
+		return tx.Bucket(bucketCerts).Delete([]byte(serial))
+	})
+}
+
 // FinalizeOrder は発行した証明書を保存し、注文を valid にする（1 トランザクション）。
 func (d *DB) FinalizeOrder(orderID string, c *Cert) error {
+	c.Pending = false
 	return d.bolt.Update(func(tx *bolt.Tx) error {
 		o, err := get[Order](tx, bucketOrders, orderID)
 		if err != nil {
@@ -363,4 +391,71 @@ func (d *DB) Cleanup(now time.Time, retention time.Duration) (removed int, err e
 		})
 	})
 	return removed, err
+}
+
+// ErrAlreadyRevoked はすでに失効していることを表す。
+var ErrAlreadyRevoked = errors.New("すでに失効している")
+
+// RevocationReasons は受け付ける失効理由（RFC 5280 §5.3.1）。
+// 0: 指定なし, 1: 鍵の漏えい, 3: 所属の変更, 4: 置き換え, 5: 運用停止。
+var RevocationReasons = []int{0, 1, 3, 4, 5}
+
+// ValidRevocationReason は受け付ける失効理由かを返す。
+func ValidRevocationReason(reason int) bool { return slices.Contains(RevocationReasons, reason) }
+
+// RevokeCert は証明書を失効させる。check が nil でなければ、更新の前に呼ぶ（所有者の確認など）。
+// 失効の記録は ACME の revokeCert と mtls-ca revoke の両方がこれを通る。
+func (d *DB) RevokeCert(serial string, reason int, check func(*Cert) error) error {
+	if !ValidRevocationReason(reason) {
+		return fmt.Errorf("失効理由 %d は受け付けない（%v）", reason, RevocationReasons)
+	}
+	_, err := d.UpdateCert(serial, func(c *Cert) error {
+		if check != nil {
+			if err := check(c); err != nil {
+				return err
+			}
+		}
+		if c.Revoked {
+			return ErrAlreadyRevoked
+		}
+		c.Revoked, c.RevokedAt, c.Reason = true, time.Now().UTC(), reason
+		return nil
+	})
+	return err
+}
+
+// ResetProcessingChallenges は確認中（processing）のまま残ったチャレンジを pending に戻す。
+// CA が確認の途中で止まった場合に、再起動後にクライアントがやり直せるようにする。起動時に呼ぶ。
+func (d *DB) ResetProcessingChallenges() (reset int, err error) {
+	err = d.bolt.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucketAuthzs)
+		var changed []*Authz
+		if err := b.ForEach(func(k, v []byte) error {
+			var a Authz
+			if err := json.Unmarshal(v, &a); err != nil {
+				return err
+			}
+			hit := false
+			for i := range a.Challenges {
+				if a.Challenges[i].Status == StatusProcessing {
+					a.Challenges[i].Status = StatusPending
+					hit = true
+				}
+			}
+			if hit {
+				changed = append(changed, &a)
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+		for _, a := range changed {
+			if err := put(tx, bucketAuthzs, a.ID, a); err != nil {
+				return err
+			}
+		}
+		reset = len(changed)
+		return nil
+	})
+	return reset, err
 }

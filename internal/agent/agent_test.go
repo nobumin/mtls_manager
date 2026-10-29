@@ -2,8 +2,10 @@ package agent
 
 import (
 	"context"
+	"crypto/x509"
 	"io"
 	"log/slog"
+	"math/big"
 	"net"
 	"net/http"
 	"os"
@@ -223,5 +225,65 @@ func waitSerial(t *testing.T, ctx context.Context, a *Agent, prev string) string
 			t.Fatal("証明書が更新されない")
 		case <-time.After(50 * time.Millisecond):
 		}
+	}
+}
+
+// chain / fullchain を出力しない設定でも、取得直後に「更新が必要」と判断しない（再発行の繰り返しを防ぐ）。
+func TestCheckWithoutChainOutputs(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	ca := testca.Start(t, nil)
+	kid, _, hmacB64 := ca.AddEAB(t, web1)
+	cfg := newConfig(t, ca, kid, hmacB64)
+	cfg.Output.Chain, cfg.Output.Fullchain, cfg.Output.CA = "", "", ""
+	listen := freeAddr(t)
+	cfg.Challenge = config.AgentChallenge{Type: config.ChallengeHTTP01, Listen: listen}
+	ca.SetTarget(config.ChallengeHTTP01, listen)
+	a := newAgent(t, cfg, ca)
+	if err := a.Obtain(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if st := a.Check(time.Now()); st.NeedsRenewal() {
+		t.Fatalf("取得直後なのに更新が必要: %s", st.Reason)
+	}
+}
+
+// 有効期間が短く fraction が小さくても、更新時期は取得した時刻から数える。
+func TestRenewAtCountsFromObtainedTime(t *testing.T) {
+	now := time.Now()
+	leaf := &x509.Certificate{SerialNumber: big.NewInt(42), NotBefore: now.Add(-5 * time.Minute), NotAfter: now.Add(10 * time.Minute)}
+	saved := &state{Serial: serialHex(leaf), ObtainedAt: now}
+	if got := renewAt(leaf, saved, 0.1); !got.After(now) {
+		t.Fatalf("更新時期 %v が取得時刻 %v より前", got, now)
+	}
+	// 別の証明書の記録なら NotBefore から数える。
+	other := &state{Serial: "ff", ObtainedAt: now}
+	if got := renewAt(leaf, other, 0.1); !got.Equal(leaf.NotBefore.Add(90 * time.Second)) {
+		t.Fatalf("NotBefore から数えていない: %v", got)
+	}
+}
+
+// CA がアカウントを受け付けなくなったら、使い回しのクライアントを捨てる（次の試行で確認し直す）。
+func TestObtainResetsClientWhenAccountRejected(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	ca := testca.Start(t, nil)
+	kid, _, hmacB64 := ca.AddEAB(t, web1)
+	cfg := newConfig(t, ca, kid, hmacB64)
+	listen := freeAddr(t)
+	cfg.Challenge = config.AgentChallenge{Type: config.ChallengeHTTP01, Listen: listen}
+	ca.SetTarget(config.ChallengeHTTP01, listen)
+	a := newAgent(t, cfg, ca)
+	if err := a.Obtain(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.client.DeactivateReg(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Obtain(ctx); err == nil {
+		t.Fatal("無効にしたアカウントで取得できた")
+	}
+	if a.client != nil {
+		t.Fatal("アカウントを拒否されても、クライアントを使い回している")
 	}
 }

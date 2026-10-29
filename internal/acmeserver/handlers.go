@@ -449,6 +449,11 @@ func (s *Server) startValidation(authzID string, idx int, accountThumbprint stri
 			case <-time.After(2 * time.Second):
 			}
 		}
+		// CA の停止で確認が取り消された場合は、結果を保存しない（取り消しを恒久的な失敗として記録しない）。
+		// processing のまま残ったチャレンジは、次の起動時に pending へ戻す（ResetProcessingChallenges）。
+		if s.ctx.Err() != nil {
+			return
+		}
 		now := time.Now().UTC()
 		_, err = s.db.UpdateAuthz(authzID, func(x *store.Authz) error {
 			ch := &x.Challenges[idx]
@@ -524,22 +529,51 @@ func (s *Server) handleFinalize(r *http.Request, req *request) (*reply, *problem
 		return nil, serverInternal("注文を更新できない")
 	}
 
-	leaf, err := s.issuer.IssueLeaf(csr.PublicKey, o.Names, s.cfg.Cert.Validity.D())
-	if err != nil {
-		s.log.Error("証明書を発行できない", "order", o.ID, "err", err)
-		p := serverInternal("証明書を発行できない")
+	fail := func(p *problem) (*reply, *problem) {
 		_, _ = s.db.UpdateOrder(o.ID, func(x *store.Order) error {
 			x.Status, x.Error = store.StatusInvalid, p.stored()
 			return nil
 		})
 		return nil, p
 	}
-	serial := fmt.Sprintf("%x", leaf.SerialNumber)
+
+	// 署名する前にシリアルを記録する。署名後に記録できなくても（プロセスが落ちても）、
+	// 発行した証明書は必ず一覧・失効・CRL の対象になる。
+	validity := s.cfg.Cert.Validity.D()
+	serialNum, err := pki.RandomSerial()
+	if err != nil {
+		return fail(serverInternal("シリアルを作れない"))
+	}
+	serial := fmt.Sprintf("%x", serialNum)
+	now := time.Now()
+	if err := s.db.ReserveCert(&store.Cert{
+		Serial: serial, AccountID: req.account.ID, OrderID: o.ID, Names: o.Names,
+		NotBefore: now, NotAfter: s.issuer.LeafNotAfter(now, validity),
+	}); err != nil {
+		s.log.Error("発行の記録を作れない", "order", o.ID, "err", err)
+		return fail(serverInternal("発行の記録を作れない"))
+	}
+	leaf, err := s.issuer.IssueLeafWithSerial(serialNum, csr.PublicKey, o.Names, validity)
+	if err != nil {
+		_ = s.db.DeleteReservedCert(serial)
+		if errors.Is(err, pki.ErrIssuerExpiring) {
+			s.log.Error("中間 CA の有効期限が近いため発行を拒否した。中間 CA を更新すること", "order", o.ID, "intermediate_not_after", s.issuer.Cert.NotAfter)
+			return fail(serverInternal("中間 CA の有効期限が近いため発行できない"))
+		}
+		s.log.Error("証明書を発行できない", "order", o.ID, "err", err)
+		return fail(serverInternal("証明書を発行できない"))
+	}
+	if leaf.NotAfter.Before(now.Add(validity - time.Minute)) {
+		s.log.Warn("中間 CA の有効期限に合わせて、証明書の有効期間を短くした。中間 CA を更新すること",
+			"serial", serial, "not_after", leaf.NotAfter, "intermediate_not_after", s.issuer.Cert.NotAfter)
+	}
 	if err := s.db.FinalizeOrder(o.ID, &store.Cert{
 		Serial: serial, AccountID: req.account.ID, OrderID: o.ID, Names: o.Names,
 		NotBefore: leaf.NotBefore, NotAfter: leaf.NotAfter, ChainPEM: pki.EncodeCertsPEM(leaf, s.issuer.Cert),
 	}); err != nil {
-		return nil, serverInternal("発行履歴を保存できない")
+		// 予約の記録は残っているので、このシリアルは失効できる。
+		s.log.Error("発行した証明書を記録できない（予約の記録は残っている）", "order", o.ID, "serial", serial, "err", err)
+		return fail(serverInternal("発行履歴を保存できない"))
 	}
 	s.log.Info("証明書を発行", "serial", serial, "names", o.Names, "not_after", leaf.NotAfter, "account", req.account.ID, "eab_kid", k.KID)
 
@@ -601,13 +635,13 @@ func (s *Server) handleCert(r *http.Request, req *request) (*reply, *problem) {
 	if c.AccountID != req.account.ID {
 		return nil, unauthorized("他のアカウントの証明書")
 	}
+	if c.Pending {
+		return nil, notFound("証明書")
+	}
 	return &reply{status: http.StatusOK, raw: c.ChainPEM, contentType: "application/pem-certificate-chain"}, nil
 }
 
 // ---- 失効 ----
-
-// 受け付ける失効理由（RFC 5280 §5.3.1）。
-var allowedReasons = []int{0, 1, 3, 4, 5}
 
 func (s *Server) handleRevoke(_ *http.Request, req *request) (*reply, *problem) {
 	var p struct {
@@ -621,8 +655,8 @@ func (s *Server) handleRevoke(_ *http.Request, req *request) (*reply, *problem) 
 	if p.Reason != nil {
 		reason = *p.Reason
 	}
-	if !slices.Contains(allowedReasons, reason) {
-		return nil, newProblem(http.StatusBadRequest, "badRevocationReason", "失効理由 %d は受け付けない（%v）", reason, allowedReasons)
+	if !store.ValidRevocationReason(reason) {
+		return nil, newProblem(http.StatusBadRequest, "badRevocationReason", "失効理由 %d は受け付けない（%v）", reason, store.RevocationReasons)
 	}
 	der, err := base64.RawURLEncoding.DecodeString(p.Certificate)
 	if err != nil {
@@ -633,15 +667,10 @@ func (s *Server) handleRevoke(_ *http.Request, req *request) (*reply, *problem) 
 		return nil, malformed("certificate を解釈できない")
 	}
 	serial := fmt.Sprintf("%x", cert.SerialNumber)
-	var errAlready = errors.New("already revoked")
-	_, err = s.db.UpdateCert(serial, func(c *store.Cert) error {
+	err = s.db.RevokeCert(serial, reason, func(c *store.Cert) error {
 		if c.AccountID != req.account.ID {
 			return errUnauthorized
 		}
-		if c.Revoked {
-			return errAlready
-		}
-		c.Revoked, c.RevokedAt, c.Reason = true, time.Now().UTC(), reason
 		return nil
 	})
 	switch {
@@ -649,7 +678,7 @@ func (s *Server) handleRevoke(_ *http.Request, req *request) (*reply, *problem) 
 		return nil, notFound("証明書")
 	case errors.Is(err, errUnauthorized):
 		return nil, unauthorized("他のアカウントの証明書は失効できない")
-	case errors.Is(err, errAlready):
+	case errors.Is(err, store.ErrAlreadyRevoked):
 		return nil, newProblem(http.StatusBadRequest, "alreadyRevoked", "すでに失効している")
 	case err != nil:
 		return nil, serverInternal("失効を保存できない")

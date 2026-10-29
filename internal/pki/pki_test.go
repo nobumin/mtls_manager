@@ -2,6 +2,7 @@ package pki
 
 import (
 	"crypto/x509"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -142,5 +143,21 @@ func TestCreateCRL(t *testing.T) {
 	}
 	if len(crl.RevokedCertificateEntries) != 1 || crl.RevokedCertificateEntries[0].SerialNumber.Cmp(serial) != 0 {
 		t.Fatalf("CRL の内容が不正: %+v", crl.RevokedCertificateEntries)
+	}
+}
+
+// 中間 CA の残りが証明書の有効期間の半分を切ったら、短い証明書を出さずに拒否する。
+func TestIssueLeafRefusesWhenIssuerExpiring(t *testing.T) {
+	iss := newTestIssuer(t) // 中間 CA の有効期間は 12 時間
+	key, _ := GenerateKey(KeyECDSAP256)
+	if _, err := iss.IssueLeaf(key.Public(), []string{"web1.example.com"}, 48*time.Hour); !errors.Is(err, ErrIssuerExpiring) {
+		t.Fatalf("残り 12 時間の中間 CA で 48 時間の証明書を発行できた: %v", err)
+	}
+	leaf, err := iss.IssueLeaf(key.Public(), []string{"web1.example.com"}, 20*time.Hour)
+	if err != nil {
+		t.Fatalf("半分以上を確保できるのに拒否された: %v", err)
+	}
+	if !leaf.NotAfter.Equal(iss.Cert.NotAfter) {
+		t.Errorf("中間 CA の期限で切り詰められていない: %v", leaf.NotAfter)
 	}
 }

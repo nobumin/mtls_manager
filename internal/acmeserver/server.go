@@ -15,6 +15,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"math/big"
 	"net"
@@ -92,6 +93,12 @@ func New(o Options) (*Server, error) {
 	if v == nil {
 		c := o.Config.Challenge
 		v = &Validator{HTTPPort: c.HTTP01Port, TLSALPNPort: c.TLSALPN01Port, Timeout: c.Timeout.D(), Resolver: c.Resolver}
+	}
+	// 前回の停止で確認中のまま残ったチャレンジを、クライアントがやり直せるよう pending に戻す。
+	if n, err := o.DB.ResetProcessingChallenges(); err != nil {
+		return nil, fmt.Errorf("確認中のチャレンジを戻せない: %w", err)
+	} else if n > 0 {
+		log.Info("確認の途中で止まっていたチャレンジを pending に戻した", "count", n)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Server{

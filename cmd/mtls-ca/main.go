@@ -73,9 +73,6 @@ func run(configPath string) error {
 			return fmt.Errorf("policy.allowed_domains の %q が中間 CA の名前制約 %v の範囲外", d, iss.Cert.PermittedDNSDomains)
 		}
 	}
-	if remaining := time.Until(iss.Cert.NotAfter); remaining < 30*24*time.Hour {
-		log.Warn("中間 CA の有効期限が近い", "not_after", iss.Cert.NotAfter)
-	}
 	if len(cfg.AllowedClientCIDRs) == 0 {
 		log.Warn("allowed_client_cidrs が空のため、どこからでも CA に接続できる")
 	}
@@ -102,6 +99,7 @@ func run(configPath string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go srv.RunCleanup(ctx, time.Hour)
+	go watchIntermediate(ctx, log, iss, cfg.Cert.Validity.D())
 
 	hs := &http.Server{
 		Addr:              cfg.Listen,
@@ -131,4 +129,24 @@ func run(configPath string) error {
 		_ = hs.Shutdown(shutdownCtx)
 	}
 	return nil
+}
+
+// watchIntermediate は中間 CA の残りの有効期間を起動時と 1 日ごとに確かめ、近ければ警告する。
+// 残りが証明書の有効期間の半分を切ると発行を拒否するので、その前に気づけるようにする。
+func watchIntermediate(ctx context.Context, log *slog.Logger, iss *pki.Issuer, validity time.Duration) {
+	t := time.NewTicker(24 * time.Hour)
+	defer t.Stop()
+	for {
+		switch remaining := time.Until(iss.Cert.NotAfter); {
+		case remaining < validity/2:
+			log.Error("中間 CA の有効期限が近いため、証明書を発行できない。中間 CA を更新すること", "not_after", iss.Cert.NotAfter)
+		case remaining < 30*24*time.Hour:
+			log.Warn("中間 CA の有効期限が近い。中間 CA を更新すること", "not_after", iss.Cert.NotAfter, "remaining", remaining.Round(time.Hour))
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
 }

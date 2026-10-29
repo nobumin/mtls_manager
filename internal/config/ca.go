@@ -174,12 +174,15 @@ func (c *CA) Complete() error {
 	if len(c.Challenge.Types) == 0 {
 		c.Challenge.Types = []string{ChallengeHTTP01, ChallengeTLSALPN01}
 	}
-	for _, t := range c.Challenge.Types {
+	for i, t := range c.Challenge.Types {
 		if t != ChallengeHTTP01 && t != ChallengeTLSALPN01 {
 			return fmt.Errorf("challenge.types: 未対応の %q（%s / %s）", t, ChallengeHTTP01, ChallengeTLSALPN01)
 		}
+		// 重複は意図しない設定なので、黙って除かずにエラーにする（提示順に意味があるのでソートもしない）。
+		if slices.Contains(c.Challenge.Types[:i], t) {
+			return fmt.Errorf("challenge.types: %q が重複している", t)
+		}
 	}
-	c.Challenge.Types = slices.Compact(c.Challenge.Types)
 	if c.Challenge.HTTP01Port == 0 {
 		c.Challenge.HTTP01Port = 80
 	}

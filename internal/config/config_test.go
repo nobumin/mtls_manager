@@ -62,3 +62,14 @@ func TestCARequiresAllowedDomains(t *testing.T) {
 		t.Fatal("http の external_url が通った")
 	}
 }
+
+func TestCARejectsDuplicateChallengeTypes(t *testing.T) {
+	c := &CA{
+		ExternalURL: "https://ca.example.com:8443", DataDir: "d", RootCert: "r", IntermediateCert: "i", IntermediateKey: "k", EABFile: "e",
+		Policy:    CAPolicy{AllowedDomains: []string{"example.com"}},
+		Challenge: CAChallenge{Types: []string{ChallengeHTTP01, ChallengeTLSALPN01, ChallengeHTTP01}},
+	}
+	if err := c.Complete(); err == nil || !strings.Contains(err.Error(), "重複") {
+		t.Fatalf("隣り合わない重複がエラーにならない: %v", err)
+	}
+}

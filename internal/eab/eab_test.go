@@ -3,6 +3,7 @@ package eab
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -65,5 +66,32 @@ func TestAddRejectsBadPattern(t *testing.T) {
 		if _, err := f.Add([]string{p}, ""); err == nil {
 			t.Errorf("不正なパターン %q を受け付けた", p)
 		}
+	}
+}
+
+// 同時に追加しても、どの変更も失われない。
+func TestUpdateIsSerialized(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "eab.json")
+	const n = 20
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := Update(path, func(f *File) error {
+				_, err := f.Add([]string{"web1.internal.example.com"}, "")
+				return err
+			}); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	wg.Wait()
+	f, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(f.Keys) != n {
+		t.Fatalf("鍵の数 = %d、want %d（同時の更新で失われた）", len(f.Keys), n)
 	}
 }
