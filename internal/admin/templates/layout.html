@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{.Title}} - mtls-ca 管理画面</title>
 <link rel="stylesheet" href="/static/app.css">
+<script src="/static/forms.js" defer></script>
 </head>
 <body>
 <header>
@@ -19,8 +20,9 @@
 </header>
 <main>
 <h1>{{.Title}}</h1>
+{{if .Flash}}<div class="flash{{if .FlashBad}} bad{{end}}" role="status">{{.Flash}}</div>{{end}}
 {{template "content" .}}
 </main>
-<footer>mtls-ca {{.Version}} ・ 表示時刻 {{fmtTime .Now}} ・ 閲覧専用</footer>
+<footer>mtls-ca {{.Version}} ・ 表示時刻 {{fmtTime .Now}} ・ {{if .Operator}}変更の操作ができる管理者{{else}}閲覧のみ{{end}}</footer>
 </body>
 </html>

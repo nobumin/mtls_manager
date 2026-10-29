@@ -34,3 +34,13 @@ table.logs td.time { white-space: nowrap; }
 .attr { display: inline-block; margin-right: 10px; }
 .attr .k { color: var(--muted); }
 footer { text-align: center; color: var(--muted); font-size: 12px; padding: 16px; }
+.flash { padding: 10px 12px; border-radius: 6px; margin-bottom: 12px; border: 1px solid var(--ok); background: #dafbe1; }
+.flash.bad { border-color: var(--bad); background: #ffebe9; }
+form.action { display: grid; gap: 8px; max-width: 720px; background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+form.action label { display: grid; gap: 4px; }
+form.action textarea, form.action input[type=text] { padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; font: inherit; }
+form.action button { justify-self: start; }
+form.inline { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 0; }
+button { padding: 5px 10px; border: 1px solid var(--line); border-radius: 6px; background: #fff; cursor: pointer; }
+button.danger { color: var(--bad); border-color: var(--bad); }
+.secret { background: #fff8c5; padding: 4px 6px; user-select: all; }

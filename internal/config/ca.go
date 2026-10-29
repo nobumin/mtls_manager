@@ -48,7 +48,7 @@ type CA struct {
 	allowedPrefixes []netip.Prefix
 }
 
-// CAAdmin は管理画面（閲覧用の Web 画面）の設定。Listen が空なら無効。
+// CAAdmin は管理画面（Web 画面）の設定。Listen が空なら無効。
 type CAAdmin struct {
 	// Listen は管理画面の待ち受けアドレス。ACME とは別のポートにし、localhost か管理用のサブネットの
 	// アドレスで待ち受ける（例: "127.0.0.1:9443"、"10.0.100.5:9443"）。空なら管理画面を起動しない。
@@ -56,6 +56,9 @@ type CAAdmin struct {
 	// AllowedClients は管理画面に入れる管理者の証明書の名前（パターン）。Listen を指定したら必須。
 	// 管理者は、この CA が発行したクライアント証明書でログインする（mTLS）。パスワードは使わない。
 	AllowedClients []string `yaml:"allowed_clients"`
+	// Operators は管理画面から変更（EAB 鍵の発行・取り消し、証明書の失効）ができる管理者の名前（パターン）。
+	// 空なら全員が閲覧のみ。AllowedClients で管理画面に入れることも必要。
+	Operators []string `yaml:"operators"`
 	// AllowedCIDRs は管理画面に接続できる送信元。空なら制限しない（Listen のアドレスで絞る）。
 	AllowedCIDRs []string `yaml:"allowed_cidrs"`
 	// LogBuffer は管理画面で閲覧できるログの件数（メモリに保持する直近の分）。既定 5000。
@@ -257,6 +260,13 @@ func (a *CAAdmin) complete() error {
 			return fmt.Errorf("admin.allowed_clients: %w", err)
 		}
 		a.AllowedClients[i] = p
+	}
+	for i, p := range a.Operators {
+		p = names.Normalize(p)
+		if err := names.ValidatePattern(p); err != nil {
+			return fmt.Errorf("admin.operators: %w", err)
+		}
+		a.Operators[i] = p
 	}
 	var err error
 	if a.allowedPrefixes, err = parsePrefixes("admin.allowed_cidrs", a.AllowedCIDRs); err != nil {

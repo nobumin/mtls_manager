@@ -14,6 +14,8 @@
 
 No CA restart is needed (changes to the EAB key file are picked up automatically).
 
+With `admin.operators` configured, you can also issue keys from the "EAB keys" page of the admin UI (the HMAC key is shown once, right after issuing; see [operations design guide 9-6](operations-design.md#9-6-changes-from-the-admin-ui)).
+
 ## Removing a server (decommissioned or suspected compromise)
 
 ```sh
@@ -23,6 +25,7 @@ sudo mtlsctl eab revoke -file /etc/mtls-ca/eab.json -kid <kid>
 
 Accounts registered with that EAB key can **no longer obtain new certificates**.
 Already issued certificates remain usable until they expire (24 hours by default). To stop them immediately, revoke them as well.
+EAB keys can also be revoked from the "EAB keys" page of the admin UI (`admin.operators`).
 
 ## Revoking a certificate
 
@@ -34,6 +37,8 @@ sudo systemctl start mtls-ca
 ```
 
 Revocations are published in the CRL (`https://ca.internal.example.com:8443/crl`).
+
+From the "Issued certificates" page of the admin UI (`admin.operators`), you can revoke **without stopping the CA**.
 
 Entries that `certs` shows as `未完了` (incomplete) are serials recorded before signing whose issuance did not complete
 (e.g. the CA stopped or the disk failed). They were never returned to a client, so exposure is unlikely, but you can revoke them to be safe.

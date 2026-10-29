@@ -32,6 +32,9 @@ type env struct {
 	issuer  *pki.Issuer
 	logs    *logbuf.Buffer
 	eabHMAC string
+	eabKID  string
+	eabPath string
+	db      *store.DB
 }
 
 func start(t *testing.T, mutate func(*config.CA)) *env {
@@ -39,10 +42,10 @@ func start(t *testing.T, mutate func(*config.CA)) *env {
 	dir := t.TempDir()
 	iss := testca.NewIssuer(t, testca.Domain)
 	eabPath := filepath.Join(dir, "eab.json")
-	var hmac string
+	var hmac, kid string
 	if err := eab.Update(eabPath, func(f *eab.File) error {
 		k, err := f.Add([]string{"web1." + testca.Domain}, "web1（Web サーバ）")
-		hmac = k.HMAC
+		hmac, kid = k.HMAC, k.KID
 		return err
 	}); err != nil {
 		t.Fatal(err)
@@ -79,7 +82,9 @@ func start(t *testing.T, mutate func(*config.CA)) *env {
 	logs := logbuf.New(1000)
 	log := slog.New(logs.Handler(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelDebug})))
 	log.Info("所有確認に失敗", "name", "web9."+testca.Domain)
-	srv, err := admin.New(admin.Options{Config: cfg, Issuer: iss, DB: db, EAB: eabStore, Logs: logs, Logger: log, Started: now})
+	e := &env{issuer: iss, logs: logs, eabHMAC: hmac, eabKID: kid, eabPath: eabPath, db: db}
+	revoke := func(serial string, reason int) error { return db.RevokeCert(serial, reason, nil) }
+	srv, err := admin.New(admin.Options{Config: cfg, Issuer: iss, DB: db, EAB: eabStore, Logs: logs, Logger: log, Started: now, Revoke: revoke})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +99,8 @@ func start(t *testing.T, mutate func(*config.CA)) *env {
 	hs := &http.Server{Handler: srv.Handler()}
 	go func() { _ = hs.Serve(ln) }()
 	t.Cleanup(func() { _ = hs.Close() })
-	return &env{addr: ln.Addr().String(), issuer: iss, logs: logs, eabHMAC: hmac}
+	e.addr = ln.Addr().String()
+	return e
 }
 
 // client は name の証明書を持つ管理者のブラウザを模す（name が空なら証明書なし）。

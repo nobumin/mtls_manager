@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/nobumin/mtls_manager/internal/config"
 	"github.com/nobumin/mtls_manager/internal/pki"
+	"github.com/nobumin/mtls_manager/internal/store"
 	"github.com/nobumin/mtls_manager/internal/testca"
 )
 
@@ -366,6 +368,50 @@ func TestRevokeAndCRL(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("失効した証明書が CRL に載っていない")
+	}
+}
+
+// 管理画面からの失効（RevokeByAdmin）も、すぐに CRL に反映される。
+func TestRevokeByAdminUpdatesCRL(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	ca := testca.Start(t, nil)
+	kid, hmac, _ := ca.AddEAB(t, web1)
+	c := newClient(t, ca)
+	register(t, ctx, c, kid, hmac)
+	certs := issue(t, ctx, ca, c, config.ChallengeHTTP01, web1)
+
+	crlHas := func() bool {
+		t.Helper()
+		res, err := ca.HTTPClient().Get(ca.URL + "/crl")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		der, _ := io.ReadAll(res.Body)
+		crl, err := x509.ParseRevocationList(der)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, e := range crl.RevokedCertificateEntries {
+			if e.SerialNumber.Cmp(certs[0].SerialNumber) == 0 {
+				return true
+			}
+		}
+		return false
+	}
+	if crlHas() { // ここで CRL が作られ、キャッシュされる
+		t.Fatal("失効前の CRL に載っている")
+	}
+	serial := fmt.Sprintf("%x", certs[0].SerialNumber)
+	if err := ca.Server.RevokeByAdmin(serial, 4); err != nil {
+		t.Fatal(err)
+	}
+	if !crlHas() {
+		t.Fatal("管理画面からの失効が CRL に反映されない")
+	}
+	if err := ca.Server.RevokeByAdmin(serial, 4); !errors.Is(err, store.ErrAlreadyRevoked) {
+		t.Errorf("二重の失効: %v", err)
 	}
 }
 

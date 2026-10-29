@@ -1,23 +1,28 @@
-// Package admin は mtls-ca の管理画面（閲覧用の Web 画面）を提供する。
+// Package admin は mtls-ca の管理画面（Web 画面）を提供する。
 //
 //   - ACME とは別のポートで待ち受ける（localhost か管理用のサブネットのアドレスで待ち受ける前提）
 //   - ログインはこの CA が発行したクライアント証明書による mTLS。パスワードは使わない。
 //     入れる管理者は設定の admin.allowed_clients（証明書の名前のパターン）で限る
 //   - アクセスはすべて監査ログ（category=audit）に残す
-//   - 現在は閲覧のみ（状態の概要、発行済み証明書、EAB 鍵、ログ）。秘密情報（鍵・HMAC）は表示しない
+//   - 状態の概要、発行済み証明書、EAB 鍵、ログを閲覧できる。秘密情報（鍵・HMAC）は表示しない
+//     （例外として、EAB 鍵を発行した直後の画面にだけ、その HMAC 鍵を一度表示する）
+//   - admin.operators に一致する管理者だけが、EAB 鍵の発行・取り消しと証明書の失効を行える（actions.go）
 package admin
 
 import (
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
 	"embed"
 	"errors"
+	"fmt"
 	"html/template"
 	"io/fs"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/netip"
+	"path/filepath"
 	"time"
 
 	"github.com/nobumin/mtls_manager/internal/config"
@@ -44,6 +49,9 @@ type Options struct {
 	Logs    *logbuf.Buffer
 	Logger  *slog.Logger
 	Started time.Time
+	// Revoke は証明書を失効させる（acmeserver.Server.RevokeByAdmin。CRL に反映するため CA を通す）。
+	// admin.operators を指定する場合は必須。
+	Revoke func(serial string, reason int) error
 }
 
 // Server は管理画面。
@@ -57,6 +65,10 @@ type Server struct {
 	started time.Time
 	tmpl    map[string]*template.Template
 	allowed []netip.Prefix
+
+	operators []string
+	revoke    func(serial string, reason int) error
+	csrfKey   []byte
 }
 
 // New は Server を作る。
@@ -74,8 +86,25 @@ func New(o Options) (*Server, error) {
 	s := &Server{
 		cfg: o.Config, issuer: o.Issuer, db: o.DB, eab: o.EAB, logs: o.Logs, log: log,
 		started: o.Started, allowed: o.Config.Admin.AllowedPrefixes(), tmpl: map[string]*template.Template{},
+		operators: o.Config.Admin.Operators, revoke: o.Revoke, csrfKey: make([]byte, 32),
 	}
-	for _, page := range []string{"dashboard", "certs", "eab", "logs"} {
+	if _, err := rand.Read(s.csrfKey); err != nil {
+		return nil, err
+	}
+	if len(s.operators) > 0 {
+		if s.revoke == nil {
+			return nil, errors.New("admin: admin.operators を指定する場合は Revoke が必須")
+		}
+		if err := checkWritable(filepath.Dir(o.Config.EABFile)); err != nil {
+			return nil, fmt.Errorf("admin.operators を使うには、eab_file のディレクトリに mtls-ca が書き込める必要がある: %w", err)
+		}
+		// ロックをかけて読めることも確かめる（root の mtlsctl が作ったロックファイルを開けないなど）。
+		errCheck := errors.New("check")
+		if err := eab.Update(o.Config.EABFile, func(*eab.File) error { return errCheck }); !errors.Is(err, errCheck) {
+			return nil, fmt.Errorf("admin.operators を使うには、mtls-ca が eab_file を更新できる必要がある: %w", err)
+		}
+	}
+	for _, page := range []string{"dashboard", "certs", "eab", "logs", "eab_created"} {
 		t, err := template.New("layout.html").Funcs(funcs).ParseFS(templateFS, "templates/layout.html", "templates/"+page+".html")
 		if err != nil {
 			return nil, err
@@ -107,6 +136,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /eab", s.page("eab", s.eabData))
 	mux.HandleFunc("GET /logs", s.page("logs", func(*http.Request) (any, error) { return nil, nil }))
 	mux.HandleFunc("GET /api/logs", s.handleLogsAPI)
+	mux.HandleFunc("POST /eab/create", s.handleEABCreate)
+	mux.HandleFunc("POST /eab/revoke", s.handleEABRevoke)
+	mux.HandleFunc("POST /certs/revoke", s.handleCertRevoke)
 	static, _ := fs.Sub(staticFS, "static")
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(static)))
 	return s.restrictSource(s.requireAdmin(securityHeaders(mux)))
@@ -168,16 +200,19 @@ func securityHeaders(next http.Handler) http.Handler {
 }
 
 type pageData struct {
-	Title   string
-	Page    string
-	Admin   string
-	Version string
-	Now     time.Time
-	Data    any
+	Title    string
+	Page     string
+	Admin    string
+	Version  string
+	Now      time.Time
+	Operator bool   // 変更の操作ができる管理者か
+	CSRF     string // 変更の操作のフォームに埋め込むトークン
+	Flash    string // 直前の操作の結果
+	FlashBad bool
+	Data     any
 }
 
 func (s *Server) page(name string, load func(*http.Request) (any, error)) http.HandlerFunc {
-	titles := map[string]string{"dashboard": "概要", "certs": "発行済み証明書", "eab": "EAB 鍵", "logs": "ログ"}
 	return func(w http.ResponseWriter, r *http.Request) {
 		data, err := load(r)
 		if err != nil {
@@ -185,10 +220,22 @@ func (s *Server) page(name string, load func(*http.Request) (any, error)) http.H
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		pd := pageData{Title: titles[name], Page: name, Admin: mtls.PeerNames(r.TLS)[0], Version: version.Version, Now: time.Now(), Data: data}
-		if err := s.tmpl[name].Execute(w, pd); err != nil {
-			s.log.Error("管理画面: 画面を作れない", "page", name, "err", err)
-		}
+		flash, bad := flashMessage(r)
+		s.render(w, r, http.StatusOK, name, data, flash, bad)
+	}
+}
+
+var titles = map[string]string{"dashboard": "概要", "certs": "発行済み証明書", "eab": "EAB 鍵", "logs": "ログ", "eab_created": "EAB 鍵を発行した"}
+
+func (s *Server) render(w http.ResponseWriter, r *http.Request, status int, name string, data any, flash string, flashBad bool) {
+	admin := mtls.PeerNames(r.TLS)[0]
+	pd := pageData{
+		Title: titles[name], Page: name, Admin: admin, Version: version.Version, Now: time.Now(),
+		Operator: s.isOperator(admin), CSRF: s.csrfToken(admin), Flash: flash, FlashBad: flashBad, Data: data,
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(status)
+	if err := s.tmpl[name].Execute(w, pd); err != nil {
+		s.log.Error("管理画面: 画面を作れない", "page", name, "err", err)
 	}
 }

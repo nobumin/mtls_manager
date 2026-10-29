@@ -691,3 +691,14 @@ func (s *Server) handleRevoke(_ *http.Request, req *request) (*reply, *problem) 
 }
 
 var errUnauthorized = errors.New("unauthorized")
+
+// RevokeByAdmin は管理画面から証明書を失効させる（アカウントを問わない）。失効は次の CRL に反映される。
+func (s *Server) RevokeByAdmin(serial string, reason int) error {
+	if err := s.db.RevokeCert(serial, reason, nil); err != nil {
+		return err
+	}
+	s.crlMu.Lock()
+	s.crlDirty = true
+	s.crlMu.Unlock()
+	return nil
+}

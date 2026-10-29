@@ -100,8 +100,8 @@ use `challenge.webroot` so an existing web server answers, or add a route.
 | Switching applications (other) | **Automatic** (needs setup) | Put a reload/restart command in `hooks.post_renew` |
 | CA's own TLS certificate | **Automatic** | Re-issued by the intermediate |
 | Deleting expired records | **Automatic** | 7 days after expiry |
-| Adding a server | Manual | `mtlsctl eab create` → deliver the EAB key → start mtls-agent |
-| Removing a server | Manual | `mtlsctl eab revoke` (plus revocation if needed) |
+| Adding a server | Manual | `mtlsctl eab create` (or the admin UI) → deliver the EAB key → start mtls-agent |
+| Removing a server | Manual | `mtlsctl eab revoke` (or the admin UI; plus revocation if needed) |
 | Rotating the intermediate | Manual (every 2 years) | Needs signing on the offline machine with the root key |
 | Rotating the root | Manual (every 10 years) | Distribute old and new roots to every server |
 | Monitoring | Manual (periodic checks) | Admin UI, logs, `mtls-agent check` |
@@ -135,11 +135,11 @@ The flow for 24-hour certificates:
 ### 9-1. Design
 
 - Setting `admin.listen` makes mtls-ca start the admin UI on a port separate from ACME.
-- It is **read-only** (overview, issued certificates, EAB keys, logs). Issuing/revoking EAB keys and revoking certificates are done with the CLI for now.
+- It shows the overview, issued certificates, EAB keys and logs. Admins matching `admin.operators` can also **issue and revoke EAB keys and revoke certificates** ([9-6](#9-6-changes-from-the-admin-ui)). Without it, everyone is read-only.
 - **Login is mTLS.** Only client certificates issued by this CA whose names match `admin.allowed_clients` get in. No passwords.
-- Every page view is recorded in the **audit log** (`category=audit`, with the admin name, path and source). Connections rejected
+- Every page view and every change is recorded in the **audit log** (`category=audit`, with the admin name, path and source). Connections rejected
   by certificate (none, another CA, a name not allowed) are logged as warnings with source and reason.
-- Secrets such as keys and HMACs are never shown. No external scripts or styles are loaded (enforced by CSP).
+- Secrets such as keys and HMACs are never shown (the one exception: the HMAC of a newly issued EAB key is shown once, right after issuing it). No external scripts or styles are loaded (enforced by CSP).
 - The logs page shows **recent entries since mtls-ca started** (5000 by default). Use journald or similar for older entries.
 
 ### 9-2. Choosing the listen address
@@ -179,8 +179,45 @@ Admin certificates also expire after 24 hours, so **they must be re-imported int
 ### 9-5. Adding and removing admins
 
 - Add: follow 9-3. With a pattern such as `*.admins.internal.example.com` in `admin.allowed_clients`, admins can be added without changing the configuration.
-- Remove: revoke that admin's EAB key (`mtlsctl eab revoke`), remove the name from `admin.allowed_clients` and restart.
+- Remove: revoke that admin's EAB key (`mtlsctl eab revoke` or the admin UI), revoke the certificate too if needed, remove the name from `admin.allowed_clients` and restart.
   Even if a certificate remains, it cannot get in once its name is no longer allowed.
+
+### 9-6. Changes from the admin UI
+
+Admins matching `admin.operators` (who must also be in `admin.allowed_clients`) can do the following.
+
+| Page | Action | Details |
+| --- | --- | --- |
+| EAB keys | Issue | Enter the allowed names (patterns) and a note. **The HMAC key is shown once, right after issuing** (it cannot be shown again). Copy it, carry it to the server over a secure channel and save it as `eab.hmac_file` (0600) |
+| EAB keys | Revoke | Servers registered with that key can no longer obtain new certificates. Already issued certificates remain usable until they expire, so revoke them as well to stop them immediately |
+| Issued certificates | Revoke | Choose a reason (unspecified, key compromise, affiliation changed, superseded, cessation of operation) and revoke. It is published in the CRL immediately. **This cannot be undone** |
+
+- Revoking an EAB key or a certificate requires both a confirmation checkbox and a confirmation dialog.
+- Unlike `mtlsctl eab` / `mtls-ca revoke`, this works **without stopping the CA** (the CLI `mtls-ca revoke` requires the CA to be stopped).
+- Every action is audit-logged (admin name, kid, serial, reason). HMAC keys are never logged.
+- **To prevent forged requests (CSRF)**, each form carries a per-admin token and cross-site submissions (`Origin` / `Sec-Fetch-Site`) are rejected.
+  This is needed because with mTLS the browser attaches the certificate automatically even to requests started by other sites. The token changes
+  every time mtls-ca starts, so reload the page after a restart before making changes.
+- Keep the number of operators small (e.g. two people responsible for operations). Put view-only staff in `admin.allowed_clients` only.
+
+#### Where to put the EAB key file
+
+Issuing or revoking EAB keys from the admin UI makes mtls-ca rewrite `eab_file`, so **mtls-ca must be able to write to the directory of `eab_file`**
+(a temporary file and a lock file are created next to it). Otherwise mtls-ca stops with an error at startup.
+
+The bundled systemd unit makes `/etc` read-only with `ProtectSystem=strict`, so when using `admin.operators` move `eab_file`
+to mtls-ca's data directory (`/var/lib/mtls-ca`, writable through the unit's `StateDirectory`).
+
+```sh
+sudo systemctl stop mtls-ca
+sudo mv /etc/mtls-ca/eab.json /var/lib/mtls-ca/eab.json
+sudo rm -f /etc/mtls-ca/eab.json.lock
+# config.yaml: eab_file: "/var/lib/mtls-ca/eab.json", and add admin.operators
+sudo systemctl start mtls-ca
+```
+
+From then on, pass `-file /var/lib/mtls-ca/eab.json` to `mtlsctl eab` as well (using the CLI and the admin UI together is safe; a lock keeps either side's changes from being lost).
+Adjust the location in your backups ([14.](#14-backup-and-restore)) accordingly.
 
 ## 10. Monitoring
 
@@ -221,7 +258,7 @@ Admin certificates also expire after 24 hours, so **they must be re-imported int
 | An EAB key (HMAC) leaked | Revoke that EAB key and deliver a new one. Check the account count of the key on the admin UI's EAB page for unexpected registrations |
 | Intermediate key leaked | ① Stop the CA ② Create a new intermediate and switch the CA ③ Certificates from the old intermediate expire within 24 hours ④ Assuming no certificates outside the name constraints can exist, investigate impersonation within them |
 | Root key leaked | Rebuild everything. Create a new root and intermediate, and set every server's `ca_root` to the new root only (remove the old root from trust) |
-| An admin certificate leaked | Revoke that admin's EAB key, remove the name from `admin.allowed_clients` and restart. The admin UI is read-only, so nothing could be changed (and no secrets are displayed) |
+| An admin certificate leaked | Revoke that admin's EAB key, remove the name from `admin.allowed_clients` and restart. If the admin was read-only, nothing could be changed (and no secrets are displayed). If the admin is in `admin.operators`, check the audit log (`category=audit`: `EAB 鍵を発行` (EAB key issued) / `EAB 鍵を取り消し` (EAB key revoked) / `証明書を失効` (certificate revoked)), revoke any EAB keys issued without authorization, and have servers whose certificates were revoked obtain new ones (`systemctl reload mtls-agent`) |
 
 ## 14. Backup and restore
 

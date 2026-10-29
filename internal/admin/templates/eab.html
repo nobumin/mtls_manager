@@ -1,12 +1,32 @@
 {{define "content"}}{{with .Data}}
-<p class="muted">EAB 鍵は、サーバごとに証明書の発行を許可する鍵。HMAC 鍵（秘密情報）はこの画面には表示しない。発行・取り消しは mtlsctl eab で行う。</p>
+<p class="muted">EAB 鍵は、サーバごとに証明書の発行を許可する鍵。HMAC 鍵（秘密情報）は、発行した直後の画面にだけ一度表示する。{{if not $.Operator}}発行・取り消しは admin.operators の管理者か、mtlsctl eab で行う。{{end}}</p>
+{{if $.Operator}}
+<h2>EAB 鍵を発行する</h2>
+<form class="action" method="post" action="/eab/create">
+  <input type="hidden" name="csrf" value="{{$.CSRF}}">
+  <label>発行してよい名前（カンマか改行で区切る。例: web2.internal.example.com、*.app.internal.example.com）
+    <textarea name="names" rows="2" required></textarea></label>
+  <label>メモ（200 文字まで。例: サーバの名前・用途）
+    <input type="text" name="note" maxlength="200"></label>
+  <button type="submit">発行する</button>
+</form>
+<h2>発行済みの EAB 鍵</h2>
+{{end}}
 <table>
-  <thead><tr><th>メモ</th><th>発行してよい名前</th><th>アカウント</th><th>最後の発行</th><th>作成</th><th>kid</th></tr></thead>
+  <thead><tr><th>メモ</th><th>発行してよい名前</th><th>アカウント</th><th>最後の発行</th><th>作成</th><th>kid</th>{{if $.Operator}}<th>取り消し</th>{{end}}</tr></thead>
   <tbody>
   {{range .Rows}}
-    <tr><td>{{.Note}}</td><td>{{join .Names ", "}}</td><td>{{.Accounts}}</td><td>{{fmtTime .LastIssued}}</td><td>{{fmtTime .CreatedAt}}</td><td class="mono">{{.KID}}</td></tr>
+    <tr><td>{{.Note}}</td><td>{{join .Names ", "}}</td><td>{{.Accounts}}</td><td>{{fmtTime .LastIssued}}</td><td>{{fmtTime .CreatedAt}}</td><td class="mono">{{.KID}}</td>
+    {{if $.Operator}}<td>
+      <form class="inline" method="post" action="/eab/revoke" data-confirm="EAB 鍵 {{.KID}}（{{.Note}}）を取り消す。この鍵で登録したサーバは、以後新しい証明書を取得できない。">
+        <input type="hidden" name="csrf" value="{{$.CSRF}}">
+        <input type="hidden" name="kid" value="{{.KID}}">
+        <label><input type="checkbox" name="confirm" value="yes" required> 確認</label>
+        <button type="submit" class="danger">取り消す</button>
+      </form>
+    </td>{{end}}</tr>
   {{else}}
-    <tr><td colspan="6" class="muted">EAB 鍵はない</td></tr>
+    <tr><td colspan="{{if $.Operator}}7{{else}}6{{end}}" class="muted">EAB 鍵はない</td></tr>
   {{end}}
   </tbody>
 </table>

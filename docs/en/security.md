@@ -28,7 +28,8 @@ What mtls_manager protects against, and what it does not. Please read this befor
 | Accepting the wrong peer | The library's server configuration **requires a peer-name allowlist** (it does not default to "anyone with a certificate from this CA") |
 | Validation redirection | http-01 does not follow redirects and ignores proxy environment variables |
 | Unauthorized access to the admin UI | It listens on a port separate from ACME and can be restricted by source. Login is **mTLS** with certificates issued by this CA, restricted by name with `admin.allowed_clients` (no passwords to guess or reuse). Every access and rejection is audit-logged |
-| Leakage or tampering via the admin UI | It is **read-only** and never shows secrets such as keys or HMACs. No external scripts are loaded (CSP). Log content is rendered as text, never interpreted as HTML |
+| Leakage or tampering via the admin UI | It never shows secrets such as keys or HMACs (the HMAC of a newly issued EAB key is shown once; the response is not cached and the HMAC is never logged). Changes are limited to admins in `admin.operators`, POST only, with confirmation. No external scripts are loaded (CSP). Log content is rendered as text, never interpreted as HTML |
+| Forged requests to the admin UI (CSRF) | With mTLS the browser attaches the certificate even to requests started by other sites. Change forms carry a per-admin token (an HMAC with a key that changes at every start) and requests whose `Origin` / `Sec-Fetch-Site` indicate another site are rejected. CSP `form-action 'self'` and `frame-ancestors 'none'` prevent redirecting form submissions and framing (clickjacking) |
 
 ## What is not protected (needs measures on your side)
 
@@ -41,7 +42,7 @@ What mtls_manager protects against, and what it does not. Please read this befor
 | Delivery of EAB keys / HMACs | Use a secure channel (e.g. scp) and delete them from the server after the first registration |
 | Storage of the root key | The file is not encrypted; store it on encrypted media |
 | CA availability | Renewal stops while the CA is down. With 24-hour certificates, expirations begin after about 8 hours of downtime. Monitor the CA and consider a longer `cert.validity` if needed |
-| Compromise of an admin machine | A stolen admin certificate and key allow viewing the admin UI (no changes are possible and no secrets are shown). Revoke that admin's EAB key and remove the name from `admin.allowed_clients` |
+| Compromise of an admin machine | A stolen admin certificate and key allow viewing the admin UI (no secrets are shown). For an admin in `admin.operators`, the attacker could also issue EAB keys (register new servers) or revoke certificates. Keep operators to a minimum; revoke that admin's EAB key, remove the name from `admin.allowed_clients` / `admin.operators`, and review the audit log |
 | Clock skew | Certificate verification depends on time; use NTP everywhere |
 
 ## Implementation choices
