@@ -438,13 +438,36 @@ func truncate(s string, n int) string {
 	return s
 }
 
-// minWaitAfterObtain は、取得した直後に更新が必要と判断されたときに、次に確かめるまでの最短の待ち時間。
-const minWaitAfterObtain = time.Minute
+// 再試行の待ち時間（指数バックオフ）。
+const (
+	minBackoff = 30 * time.Second
+	maxBackoff = 15 * time.Minute
+)
+
+// backoff は待ち時間を倍にしていく（min から始めて max で止める）。
+type backoff struct {
+	min, max, cur time.Duration
+}
+
+// next は次の待ち時間を返す。呼ぶたびに倍になる。
+func (b *backoff) next() time.Duration {
+	if b.cur == 0 {
+		b.cur = b.min
+	} else {
+		b.cur = min(b.cur*2, b.max)
+	}
+	return b.cur
+}
+
+// reset は待ち時間を最初に戻す。
+func (b *backoff) reset() { b.cur = 0 }
 
 // Run は ctx が終わるまで、状態の確認と更新を繰り返す。renewNow に値が届くと、時期を問わず更新する。
 func (a *Agent) Run(ctx context.Context, renewNow <-chan struct{}) {
-	const minBackoff, maxBackoff = 30 * time.Second, 15 * time.Minute
-	backoff := minBackoff
+	// failure は取得に失敗したとき、safety は取得した直後なのに更新が必要と判断されたとき（安全弁）の待ち時間。
+	// 安全弁が続けて働くたびに待ち時間を伸ばし、同種の不具合で再発行を繰り返さないようにする。
+	failure := &backoff{min: minBackoff, max: maxBackoff}
+	safety := &backoff{min: minBackoff, max: maxBackoff}
 	force := false
 	for {
 		st := a.Check(time.Now())
@@ -459,22 +482,22 @@ func (a *Agent) Run(ctx context.Context, renewNow <-chan struct{}) {
 				if ctx.Err() != nil {
 					return
 				}
-				wait = jitter(backoff)
+				wait = jitter(failure.next())
 				a.log.Error("証明書を取得できない（再試行する）", "err", err, "retry_in", wait.Round(time.Second))
-				backoff = min(backoff*2, maxBackoff)
 			} else {
-				force, backoff = false, minBackoff
-				// 安全弁: 取得した直後なのに、まだ更新が必要と判断される場合（設定や CA の状態の不具合）は、
-				// 取得を繰り返さず、間を置いてから確かめ直す。
+				force = false
+				failure.reset()
 				if after := a.Check(time.Now()); after.NeedsRenewal() {
-					wait = max(a.cfg.Renew.CheckInterval.D(), minWaitAfterObtain)
+					wait = max(a.cfg.Renew.CheckInterval.D(), safety.next())
 					a.log.Warn("取得した直後なのに更新が必要と判断された。設定と CA の状態を確認すること",
 						"reason", after.Reason, "retry_in", wait)
 				} else {
+					safety.reset()
 					continue
 				}
 			}
 		} else {
+			safety.reset()
 			wait = min(a.cfg.Renew.CheckInterval.D(), time.Until(st.RenewAt))
 			a.log.Debug("更新は不要", "renew_at", st.RenewAt, "not_after", st.NotAfter)
 		}

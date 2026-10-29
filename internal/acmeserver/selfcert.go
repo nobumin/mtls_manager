@@ -50,7 +50,13 @@ func (s *SelfCert) renewLocked() error {
 		return err
 	}
 	s.cur = &tls.Certificate{Certificate: [][]byte{leaf.Raw, s.issuer.Cert.Raw}, PrivateKey: key, Leaf: leaf}
-	s.renewAt = leaf.NotBefore.Add(leaf.NotAfter.Sub(leaf.NotBefore) * 2 / 3)
+	// 更新時期は作り直した時刻から数える（NotBefore は過去にずらしてあるので、そこから数えると
+	// 中間 CA が切れる直前に、TLS の接続のたびに作り直してしまう）。証明書の期限内であれば、作り直しの間隔を最低 1 分空ける。
+	now := time.Now()
+	s.renewAt = now.Add(leaf.NotAfter.Sub(now) * 2 / 3)
+	if floor := now.Add(time.Minute); s.renewAt.Before(floor) && floor.Before(leaf.NotAfter) {
+		s.renewAt = floor
+	}
 	return nil
 }
 

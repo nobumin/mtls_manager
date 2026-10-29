@@ -10,7 +10,8 @@ import (
 	"github.com/nobumin/mtls_manager/internal/pki"
 )
 
-// state はエージェントの内部状態。account_key と同じディレクトリの state.json に保存する。
+// state はエージェントの内部状態。account_key のファイル名に ".state.json" を付けたファイルに保存する
+// （同じディレクトリに複数のエージェントのアカウント鍵を置いても取り合わない）。
 // 出力の設定（chain / fullchain を出すかどうか）に関係なく、更新の判断に必要な情報を持つ。
 type state struct {
 	// Serial は最後に取得した証明書のシリアル（16 進）。
@@ -23,7 +24,7 @@ type state struct {
 }
 
 func (a *Agent) statePath() string {
-	return filepath.Join(filepath.Dir(a.cfg.AccountKey), "state.json")
+	return a.cfg.AccountKey + ".state.json"
 }
 
 // loadState は内部状態を読む。無い・読めない場合は nil（出力済みのファイルだけで判断する）。

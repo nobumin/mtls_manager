@@ -287,3 +287,31 @@ func TestObtainResetsClientWhenAccountRejected(t *testing.T) {
 		t.Fatal("アカウントを拒否されても、クライアントを使い回している")
 	}
 }
+
+// 安全弁・失敗時の待ち時間は、続けて呼ぶたびに倍になり、上限で止まり、reset で最初に戻る。
+func TestBackoffGrowsAndResets(t *testing.T) {
+	b := &backoff{min: minBackoff, max: maxBackoff}
+	want := []time.Duration{30 * time.Second, time.Minute, 2 * time.Minute, 4 * time.Minute, 8 * time.Minute, 15 * time.Minute, 15 * time.Minute}
+	for i, w := range want {
+		if got := b.next(); got != w {
+			t.Fatalf("%d 回目 = %v、want %v", i+1, got, w)
+		}
+	}
+	b.reset()
+	if got := b.next(); got != minBackoff {
+		t.Fatalf("reset 後 = %v、want %v", got, minBackoff)
+	}
+}
+
+// アカウント鍵ごとに内部状態のファイルが分かれる（同じディレクトリの複数のエージェントで取り合わない）。
+func TestStatePathPerAccountKey(t *testing.T) {
+	dir := t.TempDir()
+	a := &Agent{cfg: &config.Agent{AccountKey: filepath.Join(dir, "a.key")}}
+	b := &Agent{cfg: &config.Agent{AccountKey: filepath.Join(dir, "b.key")}}
+	if a.statePath() == b.statePath() {
+		t.Fatalf("内部状態のファイルが同じ: %s", a.statePath())
+	}
+	if got := a.statePath(); got != filepath.Join(dir, "a.key.state.json") {
+		t.Fatalf("statePath = %s", got)
+	}
+}

@@ -56,7 +56,7 @@ mtls-ca revoke -config /etc/mtls-ca/config.yaml -serial <hex> [-reason 1]
 | --- | --- | --- |
 | `ca_url` | (required) | ACME directory URL (`https://.../acme/directory`) |
 | `ca_root` | (required) | Root CA certificate, used to verify the CA connection and issued certificates. During a root rotation the file may contain both the old and new roots |
-| `account_key` | (required) | ACME account key, created on first run (0600). Internal state `state.json` (time of issuance and intermediate CA, 0600) is kept in the same directory |
+| `account_key` | (required) | ACME account key, created on first run (0600). Internal state is kept next to it in the key file name plus `.state.json` (e.g. `account.key.state.json`; time of issuance and intermediate CA, 0600) |
 | `eab.kid` | | kid printed by `mtlsctl eab create`; used only for the first registration |
 | `eab.hmac_file` | | HMAC key file (**must be 0600**). Can also be given via the `MTLS_AGENT_EAB_HMAC` environment variable. Not needed after registration |
 | `names` | (required) | Names (FQDNs) on the certificate. Must be allowed by the EAB key |

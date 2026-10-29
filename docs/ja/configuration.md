@@ -56,7 +56,7 @@ mtls-ca revoke -config /etc/mtls-ca/config.yaml -serial <16進> [-reason 1]
 | --- | --- | --- |
 | `ca_url` | （必須） | ACME ディレクトリの URL（`https://.../acme/directory`） |
 | `ca_root` | （必須） | ルート CA の証明書。CA への接続と、発行された証明書の検証に使う。ルート CA の入れ替え中は新旧を 1 つのファイルに並べてよい |
-| `account_key` | （必須） | ACME アカウントの鍵。無ければ初回に作る（0600）。同じディレクトリに内部状態 `state.json`（取得した時刻と中間 CA。0600）を置く |
+| `account_key` | （必須） | ACME アカウントの鍵。無ければ初回に作る（0600）。内部状態をアカウント鍵のファイル名に `.state.json` を付けたファイル（例: `account.key.state.json`。取得した時刻と中間 CA。0600）に置く |
 | `eab.kid` | | `mtlsctl eab create` が表示する kid。初回の登録にだけ使う |
 | `eab.hmac_file` | | HMAC 鍵のファイル（**0600 必須**）。環境変数 `MTLS_AGENT_EAB_HMAC` でも渡せる。初回の登録後は不要 |
 | `names` | （必須） | 証明書に載せる名前（FQDN）。EAB 鍵で許可された名前であること |
