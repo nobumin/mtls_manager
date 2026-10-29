@@ -137,7 +137,7 @@ func normalized(list []string) []string {
 	return slices.Compact(out)
 }
 
-// intermediates はチェーンの検証に使う中間 CA を集める。内部状態（state.json）に保存したものを必ず含めるので、
+// intermediates はチェーンの検証に使う中間 CA を集める。内部状態（<account_key>.state.json）に保存したものを必ず含めるので、
 // chain / fullchain を出力しない設定でも検証できる（出力済みのファイルにあるものも加える）。
 func (a *Agent) intermediates(saved *state) []*x509.Certificate {
 	var out []*x509.Certificate
@@ -488,7 +488,7 @@ func (a *Agent) Run(ctx context.Context, renewNow <-chan struct{}) {
 				force = false
 				failure.reset()
 				if after := a.Check(time.Now()); after.NeedsRenewal() {
-					wait = max(a.cfg.Renew.CheckInterval.D(), safety.next())
+					wait = jitter(max(a.cfg.Renew.CheckInterval.D(), safety.next()))
 					a.log.Warn("取得した直後なのに更新が必要と判断された。設定と CA の状態を確認すること",
 						"reason", after.Reason, "retry_in", wait)
 				} else {
