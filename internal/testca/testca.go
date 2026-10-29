@@ -21,6 +21,7 @@ import (
 	"github.com/nobumin/mtls_manager/internal/acmeserver"
 	"github.com/nobumin/mtls_manager/internal/config"
 	"github.com/nobumin/mtls_manager/internal/eab"
+	"github.com/nobumin/mtls_manager/internal/federation"
 	"github.com/nobumin/mtls_manager/internal/pki"
 	"github.com/nobumin/mtls_manager/internal/store"
 )
@@ -119,7 +120,17 @@ func Start(t testing.TB, mutate func(*config.CA)) *CA {
 	if testing.Verbose() {
 		logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	}
-	srv, err := acmeserver.New(acmeserver.Options{Config: cfg, Issuer: iss, DB: db, EAB: eabStore, Logger: logger, Validator: v})
+	var fed *federation.Builder
+	if cfg.Federation.File != "" {
+		st, err := federation.NewStore(cfg.Federation.File)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if fed, err = federation.NewBuilder(st, iss.Cert, iss.Key, []*x509.Certificate{iss.Root}, cfg.Federation.BundleValidity.D(), logger); err != nil {
+			t.Fatal(err)
+		}
+	}
+	srv, err := acmeserver.New(acmeserver.Options{Config: cfg, Issuer: iss, DB: db, EAB: eabStore, Logger: logger, Validator: v, Federation: fed})
 	if err != nil {
 		t.Fatal(err)
 	}
