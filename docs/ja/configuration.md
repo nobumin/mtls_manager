@@ -56,6 +56,7 @@
 | `/` | 概要（CA の証明書の期限、件数、警告） |
 | `/certs` | 発行済み証明書（`admin.operators` の管理者は失効も） |
 | `/eab` | EAB 鍵（`admin.operators` の管理者は発行・取り消しも） |
+| `/federation` | 連携（連携版。`admin.operators` の管理者は取り込み・申請・承認・停止・削除も）。`federation.file` を指定したときだけ |
 | `/logs` | ログ |
 
 鍵や HMAC などの秘密情報は表示しません（EAB 鍵を発行した直後に、その HMAC 鍵を 1 回だけ表示するのを除く）。使い方は[運用設計ガイド](operations-design.md#9-管理画面)を参照してください。

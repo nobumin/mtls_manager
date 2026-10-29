@@ -208,6 +208,7 @@ Admins matching `admin.operators` (who must also be in `admin.allowed_clients`) 
 | EAB keys | Issue | Enter the allowed names (patterns) and a note. **The HMAC key is shown once, right after issuing** (it cannot be shown again). Copy it, carry it to the server over a secure channel and save it as `eab.hmac_file` (0600) |
 | EAB keys | Revoke | Servers registered with that key can no longer obtain new certificates. Already issued certificates remain usable until they expire, so revoke them as well to stop them immediately |
 | Issued certificates | Revoke | Choose a reason (unspecified, key compromise, affiliation changed, superseded, cessation of operation) and revoke. It is published in the CRL immediately. **This cannot be undone** |
+| Federation | Import, request, approve, suspend, remove | Manage federation partners ([operations guide](operations.md#federating-with-another-organization)). Approval is done by an admin other than the requester (checked by certificate). Put `federation.file` in a directory mtls-ca can write too |
 
 - Revoking an EAB key or a certificate requires both a confirmation checkbox and a confirmation dialog.
 - The EAB key issuing form carries a one-time token. Reloading the page right after issuing (resubmitting the form) never issues a second key.

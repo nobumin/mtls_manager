@@ -56,6 +56,7 @@ The admin UI (`admin.listen`) runs on a separate port and shows the following pa
 | `/` | Overview (CA certificate expiry, counts, warnings) |
 | `/certs` | Issued certificates (operators in `admin.operators` can also revoke) |
 | `/eab` | EAB keys (operators in `admin.operators` can also issue and revoke) |
+| `/federation` | Federation (admins in `admin.operators` can also import, request, approve, suspend and remove). Only when `federation.file` is set |
 | `/logs` | Logs |
 
 It never shows secrets such as keys or HMACs (except the HMAC of a newly issued EAB key, shown once right after issuing). See the [operations design guide](operations-design.md#9-admin-web-ui) for usage.

@@ -26,6 +26,7 @@ StateDirectory=mtls-ca
 StateDirectoryMode=0700
 # admin.operators を使う場合、eab_file は /var/lib/mtls-ca に置く（/etc は ProtectSystem=strict で読み取り専用）
 # With admin.operators, put eab_file under /var/lib/mtls-ca (/etc is read-only under ProtectSystem=strict)
+# 管理画面で連携先を管理する場合、federation.file も /var/lib/mtls-ca に置く / Likewise for federation.file when managing partners in the admin UI
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes

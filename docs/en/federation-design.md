@@ -2,8 +2,8 @@
 
 [日本語](../ja/federation-design.md)
 
-> **Status: stage 1 implemented** (scoped verification in the `mtls` library, `mtlsctl federation`, trust bundle distribution by the CA, mtls-agent outputs).
-> Stages 2 and 3 are not implemented yet ([15.](#15-implementation-stages)). See the [operations guide](operations.md#federating-with-another-organization) for usage.
+> **Status: stages 1 and 2 implemented** (stage 1: scoped verification in the `mtls` library, `mtlsctl federation`, trust bundle distribution by the CA, mtls-agent outputs;
+> stage 2: the admin UI's "Federation" page). Stage 3 is not implemented yet ([15.](#15-implementation-stages)). See the [operations guide](operations.md#federating-with-another-organization) for usage.
 
 ## 1. Purpose and scope
 
@@ -234,8 +234,8 @@ that it was not substituted (integrity), and that is confirmed by the fingerprin
 3. Once approved, the record becomes "active" and enters the trust bundle
 
 - Two-person approval is required, including in-house (no setting to make it one person; decided)
-- In the stage 1 CLI (`mtlsctl federation request / approve`), the admin name (`-by`) is self-declared, and only "requester and approver have different names" is checked.
-  Identity checks with mTLS certificates come with the stage 2 admin UI
+- The admin UI (stage 2) checks the admin name with the login certificate (mTLS). In the CLI (`mtlsctl federation request / approve`), the admin name (`-by`) is self-declared,
+  and only "requester and approver have different names" is checked. Records keep the channel (admin UI / CLI), and partners involving the CLI are marked in the UI
 - Requests, approvals and rejections are all audit-logged (admin name, partner, fingerprint, scope, whom it was compared with and over which channel)
 - An expiry (default 1 year) is set; warnings appear in the admin UI and logs from 30 days before. Renewal repeats 7-3 and 7-4 (re-comparison)
 

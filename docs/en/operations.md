@@ -104,6 +104,9 @@ federation:
   file: "/etc/mtls-ca/federation.json"
 ```
 
+When managing partners from the admin UI (`admin.operators`), mtls-ca rewrites `federation.file`, so, like the EAB key file, put it in a directory
+mtls-ca can write (`/var/lib/mtls-ca/federation.json` with the bundled systemd unit); otherwise mtls-ca refuses to start.
+
 ### 2. Exchange federation records (both organizations)
 
 ```sh
@@ -139,8 +142,12 @@ sudo mtlsctl federation import -config /etc/mtls-ca/config.yaml -in b.json -id b
 The partner approves A the same way (traffic flows **only after both sides approve**).
 `mtlsctl federation list -config ... [-id b-corp]` shows the state and the record of operations.
 
-> In the stage 1 CLI, the `-by` name is self-declared (two-person approval only checks that the names differ).
-> Restrict who can log in to the CA server and review the record of operations (`federation list -id`) regularly.
+**The admin UI's "Federation" page offers the same operations (import, request, approve, suspend, remove, and exporting your own record). It is the recommended way.**
+The admin UI checks the operating admin's name with the certificate used to log in (mTLS), so it guarantees that requester and approver really are different people.
+The fingerprint fields do not accept pasting; type the fingerprint while hearing it read aloud.
+
+> In the CLI, the `-by` name is self-declared (two-person approval only checks that the names differ). Partners requested or approved via the CLI
+> are marked "includes CLI (self-declared)" in the admin UI. Restrict who can log in to the CA server and review the record of operations (`federation list -id`) regularly.
 
 ### 4. Receive partners with mtls-agent on each server
 
