@@ -225,7 +225,7 @@ func (f *File) Approve(id, fingerprint string, by Actor, ownScope []string, now 
 	// 経路をまたぐと、同じ人でも別の名前に見えて 2 人の承認を 1 人で通せてしまう。
 	if reqVia := viaOrCLI(p.RequestedVia); viaOrCLI(by.Via) != reqVia {
 		if reqVia == ViaCLI {
-			return errors.New("申請と同じ経路で承認する（この連携先は CLI で申請されたので、CLI で承認するか、管理画面で申請し直す）")
+			return errors.New("申請と同じ経路で承認する（この連携先は CLI で申請されたので、CLI で承認するか、停止してから管理画面で申請し直す）")
 		}
 		return errors.New("申請と同じ経路で承認する（この連携先は管理画面で申請されたので、管理画面で承認する）")
 	}
