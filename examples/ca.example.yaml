@@ -81,3 +81,12 @@ log:
 #     - "10.0.100.0/24"
 #   # 画面で閲覧できる直近のログの件数 / Number of recent log entries viewable in the UI
 #   log_buffer: 5000
+
+# 連携版（別々の mtls-ca で管理するサーバとの mTLS）。file を指定すると有効になる。
+# 中間 CA に名前制約が必要（自分の範囲は名前制約から得る）。連携先は mtlsctl federation で管理する。
+# Federation (mTLS with servers managed by another mtls-ca). Enabled when file is set.
+# Requires name constraints on the intermediate (your scope comes from them). Manage partners with mtlsctl federation.
+# federation:
+#   file: "/etc/mtls-ca/federation.json"
+#   # トラストバンドルの有効期限（1h〜168h）/ Trust bundle expiry (1h–168h)
+#   bundle_validity: "48h"

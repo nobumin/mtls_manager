@@ -23,7 +23,7 @@ import (
 const usage = `使い方:
   mtls-agent run   -config FILE           常駐して証明書を自動更新する（SIGHUP ですぐ更新）
   mtls-agent renew -config FILE [-force]  1 回だけ確認し、必要なら更新して終了する
-  mtls-agent check -config FILE           現在の証明書の状態を表示する（更新が必要なら終了コード 1）
+  mtls-agent check -config FILE           現在の証明書と連携版の状態を表示する（問題があれば終了コード 1）
   mtls-agent version
 `
 
@@ -100,14 +100,15 @@ func renew(path string, force bool) error {
 	if err != nil {
 		return err
 	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	st := a.Check(time.Now())
 	if !st.NeedsRenewal() && !force {
 		fmt.Printf("更新は不要（更新予定 %s、有効期限 %s）\n", st.RenewAt.Local().Format(time.RFC3339), st.NotAfter.Local().Format(time.RFC3339))
-		return nil
+	} else if err := a.Obtain(ctx); err != nil {
+		return err
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	return a.Obtain(ctx)
+	return a.SyncBundle(ctx, time.Now())
 }
 
 func check(path string) error {
@@ -115,15 +116,30 @@ func check(path string) error {
 	if err != nil {
 		return err
 	}
-	st := a.Check(time.Now())
+	now := time.Now()
+	st := a.Check(now)
+	bad := false
 	if st.Exists {
 		fmt.Printf("名前:       %v\nシリアル:   %s\n有効期限:   %s\n更新予定:   %s\n",
 			st.Names, st.Serial, st.NotAfter.Local().Format(time.RFC3339), st.RenewAt.Local().Format(time.RFC3339))
 	}
 	if st.NeedsRenewal() {
 		fmt.Println("状態:       更新が必要 –", st.Reason)
+		bad = true
+	} else {
+		fmt.Println("状態:       正常")
+	}
+	if a.Config().FederationEnabled() {
+		fmt.Println("連携版:    ", a.BundleSummary())
+		if p := a.BundleProblem(now); p != "" {
+			fmt.Println("連携の状態: 問題あり –", p)
+			bad = true
+		} else {
+			fmt.Println("連携の状態: 正常")
+		}
+	}
+	if bad {
 		os.Exit(1)
 	}
-	fmt.Println("状態:       正常")
 	return nil
 }

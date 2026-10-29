@@ -37,6 +37,8 @@ Tests verify that the bundled `examples/ca.example.yaml` and `examples/agent.exa
 | `admin.operators` | `[]` (everyone read-only) | Names (patterns) of admin certificates allowed to make changes from the admin UI (issue/revoke EAB keys, revoke certificates). They must also be in `admin.allowed_clients`. When set, mtls-ca rewrites `eab_file`, so it refuses to start unless it can write to that directory ([operations design guide 9-6](operations-design.md#9-6-changes-from-the-admin-ui)) |
 | `admin.allowed_cidrs` | `[]` (no restriction) | Sources allowed to connect. A warning is logged at startup if empty while listening on a non-loopback address |
 | `admin.log_buffer` | `5000` | Number of recent log entries viewable in the UI (100–100000). Kept in memory, since startup only |
+| `federation.file` | (empty = federation off) | Federation records file (managed with `mtlsctl federation`; contains no secrets). When set, the trust bundle is served at `/federation/bundle`. **mtls-ca refuses to start with an intermediate without name constraints** (your own scope comes from them). See the [federation design](federation-design.md) |
+| `federation.bundle_validity` | `"48h"` | Trust bundle expiry (1h–168h). Both "how long federation survives a CA outage" and "the worst-case time a suspension may fail to arrive" |
 
 ### Endpoints
 
@@ -45,6 +47,7 @@ Tests verify that the bundled `examples/ca.example.yaml` and `examples/agent.exa
 | `/acme/directory` | ACME directory (configure clients with this URL) |
 | `/crl` | CRL signed by the intermediate (DER) |
 | `/healthz` | Health check (returns `ok`) |
+| `/federation/bundle` | Trust bundle (JWS signed with the intermediate key; only when `federation.file` is set) |
 
 The admin UI (`admin.listen`) runs on a separate port and shows the following pages.
 
@@ -86,11 +89,14 @@ mtls-ca revoke -config /etc/mtls-ca/config.yaml -serial <hex> [-reason 1]
 | `output.fullchain` | | Certificate + intermediate (configure applications with this) |
 | `output.ca` | | Copy of the root CA(s) (`ca_root`) |
 | `output.key_mode` | `"0600"` | Private key mode: `"0600"` or `"0640"` (readable by applications in the same group) |
+| `output.trust_bundle` | | Federation trust bundle (signed). Point the `mtls` library's `TrustBundleFile` at it. Setting `output.trust_bundle` or `output.federation_dir` makes the agent fetch the trust bundle from the CA |
+| `output.federation_dir` | | Per-partner root CA (`<id>.pem`) and scope (`<id>.domains`), for accepting partners in nginx etc. Suspended or expired partners are replaced with a "PEM that chains to nothing" (not deleted) |
 | `renew.fraction` | `0.66` | Renew after this fraction of the lifetime has elapsed (0.1–0.9) |
 | `renew.check_interval` | `"1m"` | Status check interval |
 | `renew.timeout` | `"5m"` | Timeout for one issuance |
 | `hooks.post_renew` | | Command run after renewal, **without a shell** (e.g. `["systemctl", "reload", "nginx"]`). Receives `MTLS_AGENT_NAMES` / `MTLS_AGENT_CERT` / `MTLS_AGENT_KEY` / `MTLS_AGENT_FULLCHAIN` |
-| `hooks.timeout` | `"60s"` | Timeout for the post-renew command |
+| `hooks.timeout` | `"60s"` | Timeout for post-update commands (shared by `post_renew` / `post_bundle`) |
+| `hooks.post_bundle` | | Command run after the trust bundle (partners) changes (e.g. `["/bin/sh", "-c", "nginx -t && systemctl reload nginx"]`). On failure it is retried with exponential backoff (30 seconds to 15 minutes) until it succeeds, and `check` returns exit code 1 meanwhile. Receives `MTLS_AGENT_TRUST_BUNDLE` / `MTLS_AGENT_FEDERATION_DIR` |
 | `log.level` / `log.format` | `info` / `text` | Same as mtls-ca |
 
 On failure, the agent retries starting at 30 seconds and doubling up to 15 minutes.
@@ -100,7 +106,7 @@ On failure, the agent retries starting at 30 seconds and doubling up to 15 minut
 ```sh
 mtls-agent run   -config FILE           # run continuously (SIGHUP renews immediately)
 mtls-agent renew -config FILE [-force]  # check once, renew if needed, then exit
-mtls-agent check -config FILE           # show status (exit code 1 if renewal is needed)
+mtls-agent check -config FILE           # show the certificate and federation status (exit code 1 on problems)
 ```
 
 ## mtlsctl
@@ -112,6 +118,13 @@ mtlsctl intermediate sign -root-cert F -root-key F -csr F -out F -permitted-doma
 mtlsctl eab create -file F -names P[,P...] [-note TEXT] [-hmac-out F]
 mtlsctl eab list   -file F
 mtlsctl eab revoke -file F -kid KID
+mtlsctl federation export  -config CA_CONFIG [-org ORG] [-contacts ..] [-domains ..] [-out F]
+mtlsctl federation import  -config CA_CONFIG -in F -id ID
+mtlsctl federation request -config CA_CONFIG -id ID -compared-with TEXT [-fingerprint FP] [-domains ..] [-validity 1y]
+mtlsctl federation approve -config CA_CONFIG -id ID [-fingerprint FP]
+mtlsctl federation suspend -config CA_CONFIG -id ID [-reason TEXT]
+mtlsctl federation remove  -config CA_CONFIG -id ID
+mtlsctl federation list    -config CA_CONFIG [-id ID]
 mtlsctl inspect FILE
 ```
 

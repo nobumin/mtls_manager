@@ -12,7 +12,7 @@
 ## 2. 実装方針
 
 - 実装は **Go**。対象 OS は **Linux（主）と macOS**。
-- 依存は増やしすぎない（現状: `go-jose`、`golang.org/x/crypto`、`bbolt`、`go.yaml.in/yaml/v3`）。
+- 依存は増やしすぎない（現状: `go-jose`、`golang.org/x/crypto`、`golang.org/x/net`（パブリックサフィックスの判定のみ）、`bbolt`、`go.yaml.in/yaml/v3`）。
   暗号・JWS・ACME クライアントなどは自前で実装せず、標準ライブラリか実績のあるライブラリを使う。
 - 既定値は安全側に倒す（EAB 必須、名前制約、`allowed_domains` 必須、秘密鍵ファイルは 0600 必須など）。
   安全性を下げる変更は、理由を PR に明記する。
@@ -59,3 +59,4 @@
 | `docs/*/operations.md` | 運用手順 |
 | `docs/*/operations-design.md` | 運用設計（ネットワーク、自動化の範囲、管理画面、監視、障害・事故への対応） |
 | `docs/*/security.md` | セキュリティ設計（守れること・守れないこと） |
+| `docs/*/federation-design.md` | 連携版の設計（別々の mtls-manager の間の信頼）。実装に合わせて更新する |

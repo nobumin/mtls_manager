@@ -23,6 +23,7 @@ import (
 	"github.com/nobumin/mtls_manager/internal/admin"
 	"github.com/nobumin/mtls_manager/internal/config"
 	"github.com/nobumin/mtls_manager/internal/eab"
+	"github.com/nobumin/mtls_manager/internal/federation"
 	"github.com/nobumin/mtls_manager/internal/logbuf"
 	"github.com/nobumin/mtls_manager/internal/pki"
 	"github.com/nobumin/mtls_manager/internal/store"
@@ -97,7 +98,13 @@ func run(configPath string) error {
 	if err != nil {
 		return fmt.Errorf("eab_file: %w（mtlsctl eab create で作成する）", err)
 	}
-	srv, err := acmeserver.New(acmeserver.Options{Config: cfg, Issuer: iss, DB: db, EAB: eabStore, Logger: log})
+	var fed *federation.Builder
+	if cfg.Federation.File != "" {
+		if fed, err = newFederation(cfg, iss, log); err != nil {
+			return err
+		}
+	}
+	srv, err := acmeserver.New(acmeserver.Options{Config: cfg, Issuer: iss, DB: db, EAB: eabStore, Logger: log, Federation: fed})
 	if err != nil {
 		return err
 	}
@@ -202,4 +209,26 @@ func isLoopback(addr string) bool {
 	}
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()
+}
+
+// newFederation は連携版のトラストバンドルを作る準備をする。自分の範囲は中間 CA の名前制約から得るので、
+// 名前制約の無い中間 CA では起動しない（設計 6-4）。起動時に一度バンドルを作り、重なりなどの警告を出す。
+func newFederation(cfg *config.CA, iss *pki.Issuer, log *slog.Logger) (*federation.Builder, error) {
+	roots, err := pki.LoadCerts(cfg.RootCert)
+	if err != nil {
+		return nil, fmt.Errorf("root_cert: %w", err)
+	}
+	st, err := federation.NewStore(cfg.Federation.File)
+	if err != nil {
+		return nil, fmt.Errorf("federation.file: %w", err)
+	}
+	b, err := federation.NewBuilder(st, iss.Cert, iss.Key, roots, cfg.Federation.BundleValidity.D(), log)
+	if err != nil {
+		return nil, fmt.Errorf("連携版を使えない: %w", err)
+	}
+	if _, _, err := b.Current(time.Now()); err != nil {
+		return nil, err
+	}
+	log.Info("連携版を有効にした", "federation_file", cfg.Federation.File, "own_scope", b.OwnScope(), "bundle_validity", cfg.Federation.BundleValidity.D())
+	return b, nil
 }

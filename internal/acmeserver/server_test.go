@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"golang.org/x/crypto/acme"
 
 	"github.com/nobumin/mtls_manager/internal/config"
+	"github.com/nobumin/mtls_manager/internal/federation"
 	"github.com/nobumin/mtls_manager/internal/pki"
 	"github.com/nobumin/mtls_manager/internal/store"
 	"github.com/nobumin/mtls_manager/internal/testca"
@@ -478,5 +480,48 @@ func TestRejectsReplayedNonce(t *testing.T) {
 	res.Body.Close()
 	if res.StatusCode != http.StatusUnsupportedMediaType {
 		t.Fatalf("Content-Type 違いの status = %d", res.StatusCode)
+	}
+}
+
+// トラストバンドルの配布（連携版）。無効なら 404、有効なら署名付きのバンドルと ETag を返す。
+func TestFederationBundleEndpoint(t *testing.T) {
+	off := testca.Start(t, nil)
+	res, err := off.HTTPClient().Get(off.URL + "/federation/bundle")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("連携版が無効なのに status = %d", res.StatusCode)
+	}
+
+	fedFile := filepath.Join(t.TempDir(), "federation.json")
+	ca := testca.Start(t, func(c *config.CA) { c.Federation.File = fedFile })
+	res, err = ca.HTTPClient().Get(ca.URL + "/federation/bundle")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(res.Body)
+	res.Body.Close()
+	etag := res.Header.Get("ETag")
+	if res.StatusCode != http.StatusOK || etag == "" || res.Header.Get("Content-Type") != "application/jose" {
+		t.Fatalf("status=%d etag=%q type=%q", res.StatusCode, etag, res.Header.Get("Content-Type"))
+	}
+	v, err := federation.Verify(string(body), federation.VerifyOptions{
+		OwnRoots: []*x509.Certificate{ca.Issuer.Root}, OwnScope: []string{testca.Domain},
+		SignerConstraints: ca.Issuer.Cert.PermittedDNSDomains, Now: time.Now(),
+	})
+	if err != nil || v.Bundle.Seq != 1 || len(v.Partners) != 0 {
+		t.Fatalf("バンドルを検証できない: %+v %v", v, err)
+	}
+	req, _ := http.NewRequest(http.MethodGet, ca.URL+"/federation/bundle", nil)
+	req.Header.Set("If-None-Match", etag)
+	res, err = ca.HTTPClient().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusNotModified {
+		t.Errorf("変化が無いのに status = %d", res.StatusCode)
 	}
 }

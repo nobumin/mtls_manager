@@ -37,6 +37,8 @@
 | `admin.operators` | `[]`（全員が閲覧のみ） | 管理画面から変更（EAB 鍵の発行・取り消し、証明書の失効）ができる管理者の証明書の名前（パターン）。`admin.allowed_clients` にも含まれている必要がある。指定すると、mtls-ca が `eab_file` を書き換えるため、そのディレクトリに mtls-ca が書き込めないと起動しない（[運用設計ガイド 9-6](operations-design.md#9-6-管理画面からの変更の操作)） |
 | `admin.allowed_cidrs` | `[]`（制限なし） | 管理画面に接続できる送信元。localhost 以外で待ち受けるのに空のままだと、起動時に警告する |
 | `admin.log_buffer` | `5000` | 管理画面で閲覧できる直近のログの件数（100〜100000）。メモリに保持し、起動以降の分だけ |
+| `federation.file` | （空 = 連携版を使わない） | 連携版の連携情報のファイル（`mtlsctl federation` で管理する。秘密情報は含まない）。指定すると、`/federation/bundle` でトラストバンドルを配る。**名前制約の無い中間 CA では起動しない**（自分の範囲を名前制約から得るため）。[連携版の設計](federation-design.md) |
+| `federation.bundle_validity` | `"48h"` | トラストバンドルの有効期限（1h〜168h）。「CA が止まっても連携が続く期間」と「停止が届かないときの最悪の期間」を兼ねる |
 
 ### エンドポイント
 
@@ -45,6 +47,7 @@
 | `/acme/directory` | ACME のディレクトリ（クライアントにはこの URL を設定する） |
 | `/crl` | 中間 CA が署名した CRL（DER） |
 | `/healthz` | 死活監視用（`ok` を返す） |
+| `/federation/bundle` | トラストバンドル（中間 CA の鍵で署名した JWS。`federation.file` を指定したときだけ） |
 
 管理画面（`admin.listen`）は別のポートで、次の画面を表示します。
 
@@ -86,11 +89,14 @@ mtls-ca revoke -config /etc/mtls-ca/config.yaml -serial <16進> [-reason 1]
 | `output.fullchain` | | 証明書 + 中間 CA（アプリにはこれを指定する） |
 | `output.ca` | | ルート CA の写し（`ca_root` の内容） |
 | `output.key_mode` | `"0600"` | 秘密鍵の権限。`"0600"` または `"0640"`（同じグループのアプリに読ませる） |
+| `output.trust_bundle` | | 連携版のトラストバンドル（署名付き）。`mtls` ライブラリの `TrustBundleFile` に指定する。`output.trust_bundle` か `output.federation_dir` を指定すると、CA からトラストバンドルを取得する |
+| `output.federation_dir` | | 連携先ごとのルート CA（`<識別子>.pem`）と範囲（`<識別子>.domains`）。nginx などで連携先からの接続を受けるときに使う。停止・期限切れの連携先は「どこにもつながらない PEM」に置き換わる（消えない） |
 | `renew.fraction` | `0.66` | 有効期間のこの割合が過ぎたら更新する（0.1〜0.9） |
 | `renew.check_interval` | `"1m"` | 状態を確かめる間隔 |
 | `renew.timeout` | `"5m"` | 1 回の取得の制限時間 |
 | `hooks.post_renew` | | 更新後に実行するコマンド。**シェルを介さず**実行する（例: `["systemctl", "reload", "nginx"]`）。環境変数 `MTLS_AGENT_NAMES` / `MTLS_AGENT_CERT` / `MTLS_AGENT_KEY` / `MTLS_AGENT_FULLCHAIN` が渡される |
-| `hooks.timeout` | `"60s"` | 更新後のコマンドの制限時間 |
+| `hooks.timeout` | `"60s"` | 更新後のコマンドの制限時間（`post_renew` / `post_bundle` 共通） |
+| `hooks.post_bundle` | | トラストバンドル（連携先）の更新後に実行するコマンド（例: `["/bin/sh", "-c", "nginx -t && systemctl reload nginx"]`）。失敗したら 30 秒〜15 分の指数バックオフで成功するまで再試行し、その間は `check` が終了コード 1 を返す。環境変数 `MTLS_AGENT_TRUST_BUNDLE` / `MTLS_AGENT_FEDERATION_DIR` が渡される |
 | `log.level` / `log.format` | `info` / `text` | mtls-ca と同じ |
 
 取得に失敗したときは 30 秒から始めて最大 15 分まで、間隔を倍にしながら再試行します。
@@ -100,7 +106,7 @@ mtls-ca revoke -config /etc/mtls-ca/config.yaml -serial <16進> [-reason 1]
 ```sh
 mtls-agent run   -config FILE           # 常駐して自動更新する（SIGHUP ですぐ更新）
 mtls-agent renew -config FILE [-force]  # 1 回だけ確認し、必要なら更新して終了する
-mtls-agent check -config FILE           # 状態を表示する（更新が必要なら終了コード 1）
+mtls-agent check -config FILE           # 証明書と連携版の状態を表示する（問題があれば終了コード 1）
 ```
 
 ## mtlsctl
@@ -112,6 +118,13 @@ mtlsctl intermediate sign -root-cert F -root-key F -csr F -out F -permitted-doma
 mtlsctl eab create -file F -names P[,P...] [-note TEXT] [-hmac-out F]
 mtlsctl eab list   -file F
 mtlsctl eab revoke -file F -kid KID
+mtlsctl federation export  -config CA設定 [-org ORG] [-contacts ..] [-domains ..] [-out F]
+mtlsctl federation import  -config CA設定 -in F -id ID
+mtlsctl federation request -config CA設定 -id ID -compared-with TEXT [-fingerprint FP] [-domains ..] [-validity 1y]
+mtlsctl federation approve -config CA設定 -id ID [-fingerprint FP]
+mtlsctl federation suspend -config CA設定 -id ID [-reason TEXT]
+mtlsctl federation remove  -config CA設定 -id ID
+mtlsctl federation list    -config CA設定 [-id ID]
 mtlsctl inspect FILE
 ```
 

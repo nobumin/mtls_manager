@@ -85,6 +85,112 @@ EAB 鍵に許可された名前の範囲内なら、mtls-agent の設定の `nam
 3. 新しいルート CA で中間 CA を作り、CA サーバを切り替える。
 4. 全サーバの証明書が新しいルート CA のものに更新されたら（既定なら 1 日後）、各サーバの `ca_root` から古いルート CA を外す。
 
+## 別の組織と連携する（連携版）
+
+A 社のサーバと B 社のサーバのように、**別々の mtls-ca（別々のルート CA）で管理するサーバ間**を mTLS でつなぎます。
+互いのルート CA を、**相手の範囲（ドメイン）の名前に限って**信頼します。設計の詳細は [連携版の設計](federation-design.md) を参照してください。
+
+前提:
+
+- A と B は別のドメインを使う（例: A は `a.example.com`、B は `b.example.net`）
+- 各組織の中間 CA に名前制約がある（`mtlsctl intermediate sign -permitted-domain`）。名前制約の無い中間 CA では連携版を使えない
+
+### 1. CA で連携版を有効にする（両方の組織）
+
+`config.yaml` に次を加えて、mtls-ca を再起動します。
+
+```yaml
+federation:
+  file: "/etc/mtls-ca/federation.json"
+```
+
+### 2. 連携情報を交換する（両方の組織）
+
+```sh
+sudo mtlsctl federation export -config /etc/mtls-ca/config.yaml -org "A 社" -contacts security@a.example.com -out a.json
+```
+
+`a.json` を相手に渡します（秘密情報は含まないので、メールでかまいません）。相手からは `b.json` を受け取り、取り込みます。
+
+```sh
+sudo mtlsctl federation import -config /etc/mtls-ca/config.yaml -in b.json -id b-corp
+```
+
+`-id` は自分の側で付ける識別子です（英小文字・数字・ハイフン。ファイル名に使う）。
+
+### 3. 指紋を照合し、2 人で承認する
+
+1. 表示された指紋の**全体（64 桁）**を、**ファイルとは無関係に前もって知っている相手の連絡先**（契約書の窓口など）と、
+   電話・対面など**ファイルとは別の経路**で読み合わせる。ファイルに書かれた連絡先は相手の申告（未検証）なので使わない
+2. 1 人目の管理者が申請する（指紋は読み上げを聞いて入力する）。
+
+   ```sh
+   sudo mtlsctl federation request -config /etc/mtls-ca/config.yaml -id b-corp \
+     -compared-with "契約書記載の B 社 情報システム部 △△ 氏、電話" -by alice
+   ```
+
+   範囲を狭めるには `-domains api.b.example.net` を付けます（相手の申告より広くはできない）。
+3. **別の**管理者が承認する（指紋をもう一度入力する）。
+
+   ```sh
+   sudo mtlsctl federation approve -config /etc/mtls-ca/config.yaml -id b-corp -by bob
+   ```
+
+相手の組織も、同じ手順で A を承認します（**双方が承認して初めて**通信できる）。
+`mtlsctl federation list -config ... [-id b-corp]` で状態と操作の記録を確認できます。
+
+> 段階 1 の CLI では、`-by` の名前は自己申告です（2 人の承認は「別の名前」であることだけを確かめる）。
+> CA サーバにログインできる人を限り、操作の記録（`federation list -id`）を定期的に確かめてください。
+
+### 4. 各サーバの mtls-agent で連携先を受け取る
+
+mtls-agent の設定に、出力先と（nginx などを使う場合は）更新後のコマンドを加えて再起動します。
+
+```yaml
+output:
+  trust_bundle: "/etc/mtls-agent/tls/trust-bundle.jws"   # mtls ライブラリ用
+  federation_dir: "/etc/mtls-agent/federation"           # nginx など用（<識別子>.pem / <識別子>.domains）
+hooks:
+  post_bundle: ["/bin/sh", "-c", "nginx -t && systemctl reload nginx"]
+```
+
+mtls-agent は既定 1 分ごとに CA からトラストバンドルを取得し、署名と内容を確かめて書き出します。
+
+### 5. アプリで連携先を受け入れる
+
+- **Go（`mtls` ライブラリ）**: `TrustBundleFile` を加え、`AllowedPeers` に相手のサーバの名前を加えます。`CertFile` には fullchain を指定します。
+
+  ```go
+  cfg, err := mtls.NewServerTLSConfig(mtls.Config{
+      CertFile: "/etc/mtls-agent/tls/fullchain.pem", KeyFile: "/etc/mtls-agent/tls/key.pem",
+      CAFile: "/etc/mtls-agent/tls/ca.pem", TrustBundleFile: "/etc/mtls-agent/tls/trust-bundle.jws",
+      AllowedPeers: []string{"app1.a.example.com", "web1.b.example.net"},
+  })
+  ```
+
+  - 連携先の相手は、必ず `AllowedPeers` に名前を書きます（`AllowAnyPeer` は自分の組織の相手にだけ効く）。
+  - クライアント側は、**ホスト名（DNS 名）で接続**します。IP アドレスでの接続はホスト名を確かめられないので拒否されます（`tls.Config.ServerName` を指定すれば接続できる）。
+
+- **nginx など**: 範囲を確かめられないので、**連携先からの接続を受けるポートを分け**、そのポートでは
+  `federation_dir/<識別子>.pem`（その連携先のルート CA だけ）を信頼し、相手の名前を**完全一致**で許可します（ワイルドカードを書かない）。
+  導入時と停止の後に、`nginx -t` が通ること、reload 後に連携先からの接続が拒否されることを確かめます。
+
+### 6. 連携を停止する
+
+```sh
+sudo mtlsctl federation suspend -config /etc/mtls-ca/config.yaml -id b-corp -reason "侵害の疑い" -by carol
+```
+
+停止は 1 人で即時にできます。各サーバには既定 1 分以内に届き、`federation_dir` の PEM は「どこにもつながらない PEM」に置き換わります。
+**CA と各サーバの通信が妨げられている場合、最悪はトラストバンドルの有効期限（既定 2 日）まで信頼が残ります**。
+急ぐ場合は、各アプリの `AllowedPeers`（nginx は許可リスト）からも相手の名前を外してください。
+再開は、照合と 2 人の承認（手順 3）をやり直します。不要になったら `mtlsctl federation remove` で消します。
+
+### 監視
+
+`mtls-agent check` は、トラストバンドルの期限切れ・期限が 1 日を切った・更新後のコマンドが失敗し続けている場合に、終了コード 1 を返します。
+連携の有効期限（既定 1 年）が 30 日を切ると、mtls-ca のログに警告が出ます。期限までに照合と承認をやり直してください。
+
 ## バックアップ
 
 | 対象 | 場所 | 内容 |
@@ -92,6 +198,7 @@ EAB 鍵に許可された名前の範囲内なら、mtls-agent の設定の `nam
 | ルート CA の鍵 | オフラインの端末 | 暗号化した媒体に 2 部。CA サーバとは別の場所に保管する |
 | 中間 CA の鍵・証明書 | `/etc/mtls-ca/` | 失うと中間 CA を作り直すことになる（各サーバ側の作業は不要） |
 | EAB 鍵ファイル | `/etc/mtls-ca/eab.json` | 失うと全サーバの EAB 鍵を発行し直すことになる |
+| 連携情報のファイル（連携版） | `/etc/mtls-ca/federation.json` | 連携先と承認の記録。失うと照合と承認をやり直すことになる（秘密情報は含まない） |
 | データベース | `/var/lib/mtls-ca/` | アカウントと発行履歴。mtls-ca を止めてからコピーする。失うと各サーバの再登録が必要 |
 
 バックアップには秘密鍵が含まれます。暗号化し、アクセスできる人を限ってください。

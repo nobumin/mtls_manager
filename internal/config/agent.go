@@ -61,6 +61,12 @@ type AgentOutput struct {
 	Fullchain string `yaml:"fullchain"` // 末端 + 中間 CA（任意）
 	Key       string `yaml:"key"`       // 秘密鍵
 	CA        string `yaml:"ca"`        // ルート CA の写し（任意。アプリの信頼先に使う）
+	// TrustBundle は連携版のトラストバンドル（署名付きの JWS）の出力先。mtls ライブラリの TrustBundleFile に指定する。
+	// TrustBundle か FederationDir を指定すると、CA からトラストバンドルを取得する（任意）。
+	TrustBundle string `yaml:"trust_bundle"`
+	// FederationDir は連携先ごとの PEM（<連携先>.pem。その連携先のルート CA だけ）と範囲（<連携先>.domains）の出力先。
+	// nginx などで連携先からの接続を受けるときに使う（任意）。
+	FederationDir string `yaml:"federation_dir"`
 	// KeyMode は秘密鍵の権限。0600（既定）または 0640（同じグループのアプリに読ませる場合）。
 	KeyMode string `yaml:"key_mode"`
 
@@ -81,6 +87,9 @@ type AgentRenew struct {
 type AgentHooks struct {
 	// PostRenew は更新後に実行するコマンド（シェルを介さず実行する。例: ["systemctl", "reload", "nginx"]）。
 	PostRenew []string `yaml:"post_renew"`
+	// PostBundle はトラストバンドル（連携先）の更新後に実行するコマンド（例: ["/bin/sh", "-c", "nginx -t && systemctl reload nginx"]）。
+	// 失敗したら、指数バックオフで成功するまで再試行する。
+	PostBundle []string `yaml:"post_bundle"`
 	// Timeout は既定 60s。
 	Timeout Duration `yaml:"timeout"`
 }
@@ -179,3 +188,8 @@ func (a *Agent) Complete() error {
 
 // KeyFileMode は秘密鍵の出力権限を返す。
 func (o AgentOutput) KeyFileMode() fs.FileMode { return o.keyMode }
+
+// FederationEnabled は連携版のトラストバンドルを取得するかを返す。
+func (a *Agent) FederationEnabled() bool {
+	return a.Output.TrustBundle != "" || a.Output.FederationDir != ""
+}

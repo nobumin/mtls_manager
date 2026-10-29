@@ -43,6 +43,10 @@ output:
   ca: "/etc/mtls-agent/tls/ca.pem"               # ルート CA の写し / copy of root CA
   # 0600（既定）または 0640（同じグループのアプリに読ませる）/ 0600 (default) or 0640
   key_mode: "0600"
+  # 連携版（別々の mtls-ca で管理するサーバとの mTLS）。指定すると CA からトラストバンドルを取得する
+  # Federation (mTLS with servers managed by another mtls-ca). Setting these fetches the trust bundle from the CA
+  # trust_bundle: "/etc/mtls-agent/tls/trust-bundle.jws"   # mtls ライブラリの TrustBundleFile / for the mtls library
+  # federation_dir: "/etc/mtls-agent/federation"           # nginx など用（<識別子>.pem）/ for nginx etc.
 
 renew:
   # 有効期間のこの割合が過ぎたら更新（0.66 = 残り 1/3）/ Renew after this fraction of lifetime
@@ -53,6 +57,9 @@ renew:
 hooks:
   # 更新後に実行するコマンド（シェルを介さない）/ Command run after renewal (no shell)
   # post_renew: ["systemctl", "reload", "nginx"]
+  # トラストバンドル（連携先）の更新後に実行するコマンド（失敗したら再試行する）
+  # Command run after the trust bundle (partners) changes (retried on failure)
+  # post_bundle: ["/bin/sh", "-c", "nginx -t && systemctl reload nginx"]
   timeout: "60s"
 
 log:

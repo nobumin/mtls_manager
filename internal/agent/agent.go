@@ -45,6 +45,9 @@ type Agent struct {
 
 	mu     sync.Mutex
 	client *acme.Client
+
+	// fed は連携版（トラストバンドル）の、プロセスの中だけの状態。
+	fed fedRuntime
 }
 
 // New は Agent を作る。
@@ -69,7 +72,7 @@ func New(cfg *config.Agent, log *slog.Logger) (*Agent, error) {
 			TLSHandshakeTimeout: 10 * time.Second,
 		},
 	}
-	return &Agent{cfg: cfg, log: log, roots: roots, pool: pool, http: hc}, nil
+	return &Agent{cfg: cfg, log: log, roots: roots, pool: pool, http: hc, fed: fedRuntime{hookBackoff: backoff{min: minBackoff, max: maxBackoff}}}, nil
 }
 
 // Status は現在の証明書の状態。
@@ -470,6 +473,7 @@ func (a *Agent) Run(ctx context.Context, renewNow <-chan struct{}) {
 	safety := &backoff{min: minBackoff, max: maxBackoff}
 	force := false
 	for {
+		_ = a.SyncBundle(ctx, time.Now())
 		st := a.Check(time.Now())
 		var wait time.Duration
 		if st.NeedsRenewal() || force {
@@ -535,3 +539,6 @@ func needsReregistration(err error) bool {
 	}
 	return false
 }
+
+// Config は設定を返す。
+func (a *Agent) Config() *config.Agent { return a.cfg }

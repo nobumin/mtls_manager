@@ -73,3 +73,22 @@ func TestCARejectsDuplicateChallengeTypes(t *testing.T) {
 		t.Fatalf("隣り合わない重複がエラーにならない: %v", err)
 	}
 }
+
+func TestCAFederationBundleValidity(t *testing.T) {
+	base := func(v Duration) *CA {
+		return &CA{
+			ExternalURL: "https://ca.example.com:8443", DataDir: "d", RootCert: "r", IntermediateCert: "i", IntermediateKey: "k", EABFile: "e",
+			Policy:     CAPolicy{AllowedDomains: []string{"example.com"}},
+			Federation: CAFederation{File: "f", BundleValidity: v},
+		}
+	}
+	c := base(0)
+	if err := c.Complete(); err != nil || c.Federation.BundleValidity.D() != 48*time.Hour {
+		t.Fatalf("既定値: %v %v", c.Federation.BundleValidity.D(), err)
+	}
+	for _, v := range []time.Duration{time.Minute, 8 * 24 * time.Hour} {
+		if err := base(Duration(v)).Complete(); err == nil {
+			t.Errorf("%v を受け付けた", v)
+		}
+	}
+}

@@ -38,12 +38,13 @@ type CA struct {
 	// AllowedClientCIDRs は CA に接続できる送信元。空なら制限しない（非推奨）。
 	AllowedClientCIDRs []string `yaml:"allowed_client_cidrs"`
 
-	Policy    CAPolicy    `yaml:"policy"`
-	Cert      CACert      `yaml:"cert"`
-	Challenge CAChallenge `yaml:"challenge"`
-	CRL       CACRL       `yaml:"crl"`
-	Admin     CAAdmin     `yaml:"admin"`
-	Log       Log         `yaml:"log"`
+	Policy     CAPolicy     `yaml:"policy"`
+	Cert       CACert       `yaml:"cert"`
+	Challenge  CAChallenge  `yaml:"challenge"`
+	CRL        CACRL        `yaml:"crl"`
+	Admin      CAAdmin      `yaml:"admin"`
+	Federation CAFederation `yaml:"federation"`
+	Log        Log          `yaml:"log"`
 
 	allowedPrefixes []netip.Prefix
 }
@@ -65,6 +66,15 @@ type CAAdmin struct {
 	LogBuffer int `yaml:"log_buffer"`
 
 	allowedPrefixes []netip.Prefix
+}
+
+// CAFederation は連携版（別々の mtls-ca で管理するサーバ間の mTLS）の設定。File が空なら無効。
+type CAFederation struct {
+	// File は連携情報のファイル（mtlsctl federation で管理する。秘密情報は含まない）。
+	File string `yaml:"file"`
+	// BundleValidity はトラストバンドルの有効期限。既定 48h（1h〜168h）。
+	// 「CA が止まっても連携が続く期間」と「停止が届かないときの最悪の期間」を兼ねる。
+	BundleValidity Duration `yaml:"bundle_validity"`
 }
 
 // AllowedPrefixes は解釈済みの送信元制限を返す。
@@ -222,6 +232,14 @@ func (c *CA) Complete() error {
 	}
 	if err := c.Admin.complete(); err != nil {
 		return err
+	}
+	if c.Federation.File != "" {
+		if c.Federation.BundleValidity == 0 {
+			c.Federation.BundleValidity = Duration(48 * time.Hour)
+		}
+		if v := c.Federation.BundleValidity.D(); v < time.Hour || v > 7*24*time.Hour {
+			return errors.New("federation.bundle_validity は 1h〜168h")
+		}
 	}
 	return c.Log.complete()
 }
