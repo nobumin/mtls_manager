@@ -137,7 +137,7 @@ The flow for 24-hour certificates:
 - Setting `admin.listen` makes mtls-ca start the admin UI on a port separate from ACME.
 - It shows the overview, issued certificates, EAB keys and logs. Admins matching `admin.operators` can also **issue and revoke EAB keys and revoke certificates** ([9-6](#9-6-changes-from-the-admin-ui)). Without it, everyone is read-only.
 - **Login is mTLS.** Only client certificates issued by this CA whose names match `admin.allowed_clients` get in. No passwords.
-- **Revoked admin certificates cannot get in.** The admin UI runs in the same process as the CA and has the issuance records, so it checks them on every connection without using the CRL. Certificates with no issuance record at this CA are rejected too.
+- **Revoked admin certificates cannot get in.** The admin UI runs in the same process as the CA and has the issuance records, so it checks them on every connection without using the CRL. Certificates with no issuance record at this CA are rejected too. It also checks that **the EAB key that issued the certificate still permits that admin name exactly** (revoking the EAB key, or a certificate issued with a server's wildcard key whose name later matches `admin.allowed_clients`, means no entry).
 - Every page view and every change is recorded in the **audit log** (`category=audit`, with the admin name, path and source). Connections rejected
   by certificate (none, another CA, a name not allowed) are logged as warnings with source and reason.
 - Secrets such as keys and HMACs are never shown (the one exception: the HMAC of a newly issued EAB key is shown once, right after issuing it). No external scripts or styles are loaded (enforced by CSP).
@@ -193,7 +193,7 @@ Admin certificates also expire after 24 hours, so **they must be re-imported int
 - Add: follow 9-3. With a pattern such as `*.admins.internal.example.com` in `admin.allowed_clients`, admins can be added without changing the configuration
   (each admin's EAB key must still name the exact name, e.g. `admin1.admins.internal.example.com`).
 - Remove: revoke that admin's certificate (the admin UI's "Issued certificates" page or `mtls-ca revoke`); **the admin is locked out immediately**.
-  Also revoke the EAB key (so no new certificate can be obtained) and, if names are listed individually, remove it from `admin.allowed_clients` (takes effect after a restart).
+  Revoking that admin's EAB key **also locks them out immediately** (and no new certificate can be obtained). Also, if names are listed individually, remove it from `admin.allowed_clients` (takes effect after a restart).
 
 ### 9-6. Changes from the admin UI
 
@@ -273,7 +273,7 @@ Adjust the location in your backups ([14.](#14-backup-and-restore)) accordingly.
 | An EAB key (HMAC) leaked | Revoke that EAB key and deliver a new one. Check the account count of the key on the admin UI's EAB page for unexpected registrations |
 | Intermediate key leaked | ① Stop the CA ② Create a new intermediate and switch the CA ③ Certificates from the old intermediate expire within 24 hours ④ Assuming no certificates outside the name constraints can exist, investigate impersonation within them |
 | Root key leaked | Rebuild everything. Create a new root and intermediate, and set every server's `ca_root` to the new root only (remove the old root from trust) |
-| An admin certificate leaked | Revoke that admin's certificate (**locks them out immediately**) and EAB key. If names are listed individually, also remove it from `admin.allowed_clients`. If the admin was read-only, nothing could be changed (and no secrets are displayed). If the admin is in `admin.operators`, check the audit log (`category=audit`: `EAB 鍵を発行` (EAB key issued) / `EAB 鍵を取り消し` (EAB key revoked) / `証明書を失効` (certificate revoked)), revoke any EAB keys issued without authorization, and have servers whose certificates were revoked obtain new ones (`systemctl reload mtls-agent`) |
+| An admin certificate leaked | Revoke that admin's certificate and EAB key (**either one locks them out immediately**). If names are listed individually, also remove it from `admin.allowed_clients`. If the admin was read-only, nothing could be changed (and no secrets are displayed). If the admin is in `admin.operators`, check the audit log (`category=audit`: `EAB 鍵を発行` (EAB key issued) / `EAB 鍵を取り消し` (EAB key revoked) / `証明書を失効` (certificate revoked)), revoke any EAB keys issued without authorization, and have servers whose certificates were revoked obtain new ones (`systemctl reload mtls-agent`) |
 
 ## 14. Backup and restore
 

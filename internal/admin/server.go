@@ -28,6 +28,7 @@ import (
 	"github.com/nobumin/mtls_manager/internal/config"
 	"github.com/nobumin/mtls_manager/internal/eab"
 	"github.com/nobumin/mtls_manager/internal/logbuf"
+	"github.com/nobumin/mtls_manager/internal/names"
 	"github.com/nobumin/mtls_manager/internal/pki"
 	"github.com/nobumin/mtls_manager/internal/store"
 	"github.com/nobumin/mtls_manager/internal/version"
@@ -262,6 +263,34 @@ func (s *Server) certRejected(c *x509.Certificate) string {
 		return "失効した証明書"
 	case rec.Pending:
 		return "発行を完了していない証明書"
+	}
+	return s.eabRejected(rec, c)
+}
+
+// eabRejected は、管理者の証明書を発行したアカウントの EAB 鍵が、今もその名前を完全一致で許可しているかを確かめる。
+// 発行の時点（acmeserver の checkNames）と同じ条件をログインの時点でも確かめることで、次の場合に入れないようにする。
+//   - EAB 鍵を取り消した（その鍵で取った管理者の証明書でも、すぐに入れなくなる）
+//   - admin.allowed_clients を後から広げ、サーバ用のワイルドカードの鍵で発行済みの証明書が管理者の名前に一致した
+func (s *Server) eabRejected(rec *store.Cert, c *x509.Certificate) string {
+	acct, err := s.db.Account(rec.AccountID)
+	if err != nil {
+		if !errors.Is(err, store.ErrNotFound) {
+			s.log.Error("管理画面: アカウントを読めない", "err", err)
+		}
+		return "発行したアカウントを確かめられない証明書"
+	}
+	k, ok, err := s.eab.Lookup(acct.EABKeyID)
+	switch {
+	case err != nil:
+		s.log.Error("管理画面: EAB 鍵ファイルを読めない", "err", err)
+		return "EAB 鍵を確かめられない証明書"
+	case !ok:
+		return "取り消した EAB 鍵で発行した証明書"
+	}
+	for _, n := range c.DNSNames {
+		if names.MatchAny(s.cfg.Admin.AllowedClients, n) && !k.PermitsExactly(n) {
+			return "管理者の名前を完全一致で許可していない EAB 鍵で発行した証明書"
+		}
 	}
 	return ""
 }

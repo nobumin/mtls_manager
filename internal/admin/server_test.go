@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -36,6 +37,9 @@ type env struct {
 	eabKID  string
 	eabPath string
 	db      *store.DB
+
+	mu        sync.Mutex
+	adminKIDs map[string]string // client が管理者の証明書のために作った EAB 鍵（名前 → kid）
 }
 
 func start(t *testing.T, mutate func(*config.CA)) *env {
@@ -108,12 +112,14 @@ func start(t *testing.T, mutate func(*config.CA)) *env {
 // この CA（e.issuer）の証明書なら、CA が発行したときと同じく発行の記録も残す。
 func (e *env) client(t *testing.T, iss *pki.Issuer, name string) *http.Client {
 	t.Helper()
-	c, _ := e.clientWithSerial(t, iss, name, true)
+	c, _ := e.clientWithSerial(t, iss, name, true, "")
 	return c
 }
 
 // clientWithSerial は client と同じで、証明書のシリアル（発行の記録のキー）も返す。record が false なら発行の記録を残さない。
-func (e *env) clientWithSerial(t *testing.T, iss *pki.Issuer, name string, record bool) (*http.Client, string) {
+// 発行の記録は、CA で発行したときと同じく、アカウントと EAB 鍵に結び付ける。kid が空なら、その名前を
+// 完全一致で許可する EAB 鍵を作って使う（管理者の証明書の正しい取り方）。
+func (e *env) clientWithSerial(t *testing.T, iss *pki.Issuer, name string, record bool, kid string) (*http.Client, string) {
 	t.Helper()
 	var serial string
 	roots := x509.NewCertPool()
@@ -128,15 +134,66 @@ func (e *env) clientWithSerial(t *testing.T, iss *pki.Issuer, name string, recor
 		tc.Certificates = []tls.Certificate{{Certificate: [][]byte{leaf.Raw, iss.Cert.Raw}, PrivateKey: key}}
 		serial = fmt.Sprintf("%x", leaf.SerialNumber)
 		if iss == e.issuer && record {
-			if err := e.db.CreateOrder(&store.Order{ID: "o-" + serial, Status: store.StatusProcessing}, nil); err != nil {
+			if kid == "" {
+				kid = e.adminKey(t, name)
+			}
+			if _, _, err := e.db.CreateAccount(&store.Account{ID: "a-" + serial, Thumbprint: "t-" + serial, EABKeyID: kid}); err != nil {
 				t.Fatal(err)
 			}
-			if err := e.db.FinalizeOrder("o-"+serial, &store.Cert{Serial: serial, Names: []string{name}, NotBefore: leaf.NotBefore, NotAfter: leaf.NotAfter}); err != nil {
+			if err := e.db.CreateOrder(&store.Order{ID: "o-" + serial, AccountID: "a-" + serial, Status: store.StatusProcessing}, nil); err != nil {
+				t.Fatal(err)
+			}
+			if err := e.db.FinalizeOrder("o-"+serial, &store.Cert{Serial: serial, AccountID: "a-" + serial, Names: []string{name}, NotBefore: leaf.NotBefore, NotAfter: leaf.NotAfter}); err != nil {
 				t.Fatal(err)
 			}
 		}
 	}
 	return &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{TLSClientConfig: tc}}, serial
+}
+
+// adminKey は name を完全一致で許可する EAB 鍵を（名前ごとに 1 つ）作り、その kid を返す。
+func (e *env) adminKey(t *testing.T, name string) string {
+	t.Helper()
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if kid, ok := e.adminKIDs[name]; ok {
+		return kid
+	}
+	var kid string
+	if err := eab.Update(e.eabPath, func(f *eab.File) error {
+		k, err := f.Add([]string{name}, "管理者（テスト）")
+		kid = k.KID
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if e.adminKIDs == nil {
+		e.adminKIDs = map[string]string{}
+	}
+	e.adminKIDs[name] = kid
+	return kid
+}
+
+// userKeys は EAB 鍵のうち、adminKey が作ったもの以外を返す（テストの操作で増減した鍵を数えるため）。
+func (e *env) userKeys(t *testing.T) []eab.Key {
+	t.Helper()
+	f, err := eab.Load(e.eabPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	helper := map[string]bool{}
+	for _, kid := range e.adminKIDs {
+		helper[kid] = true
+	}
+	var out []eab.Key
+	for _, k := range f.Keys {
+		if !helper[k.KID] {
+			out = append(out, k)
+		}
+	}
+	return out
 }
 
 func get(t *testing.T, c *http.Client, url string) (*http.Response, string) {

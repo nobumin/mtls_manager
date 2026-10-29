@@ -78,15 +78,6 @@ func post(t *testing.T, c *http.Client, u string, form url.Values, header map[st
 	return res, string(body)
 }
 
-func loadEAB(t *testing.T, path string) *eab.File {
-	t.Helper()
-	f, err := eab.Load(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return f
-}
-
 func auditFind(e *env, text string) []logbuf.Entry {
 	return e.logs.Find(logbuf.Query{Text: text})
 }
@@ -113,8 +104,8 @@ func TestViewerCannotChange(t *testing.T) {
 			t.Errorf("%s: status = %d（403 のはず）", path, res.StatusCode)
 		}
 	}
-	if f := loadEAB(t, e.eabPath); len(f.Keys) != 1 {
-		t.Errorf("EAB 鍵が変わった: %d 件", len(f.Keys))
+	if f := e.userKeys(t); len(f) != 1 {
+		t.Errorf("EAB 鍵が変わった: %d 件", len(f))
 	}
 	if c, _ := e.db.Cert("abc123"); c.Revoked {
 		t.Error("証明書が失効した")
@@ -141,11 +132,11 @@ func TestOperatorCreatesAndRevokesEAB(t *testing.T) {
 	if res.Header.Get("Cache-Control") != "no-store" {
 		t.Error("発行の応答がキャッシュされ得る")
 	}
-	f := loadEAB(t, e.eabPath)
-	if len(f.Keys) != 2 {
-		t.Fatalf("EAB 鍵が %d 件", len(f.Keys))
+	f := e.userKeys(t)
+	if len(f) != 2 {
+		t.Fatalf("EAB 鍵が %d 件", len(f))
 	}
-	k := f.Keys[1]
+	k := f[1]
 	if !strings.Contains(body, k.HMAC) || !strings.Contains(body, k.KID) {
 		t.Fatal("発行した HMAC 鍵・kid が表示されない")
 	}
@@ -171,7 +162,7 @@ func TestOperatorCreatesAndRevokesEAB(t *testing.T) {
 	if res.StatusCode != http.StatusConflict || !strings.Contains(body, "すでに行った") {
 		t.Errorf("再送信: status = %d", res.StatusCode)
 	}
-	if len(loadEAB(t, e.eabPath).Keys) != 2 {
+	if len(e.userKeys(t)) != 2 {
 		t.Fatal("再送信で鍵がもう 1 つ発行された")
 	}
 	// 使い捨てのトークンが無いフォームも受け付けない。
@@ -185,7 +176,7 @@ func TestOperatorCreatesAndRevokesEAB(t *testing.T) {
 	if res.StatusCode != http.StatusBadRequest || !strings.Contains(body, "確認のチェック") {
 		t.Errorf("確認なしの取り消し: status = %d", res.StatusCode)
 	}
-	if len(loadEAB(t, e.eabPath).Keys) != 2 {
+	if len(e.userKeys(t)) != 2 {
 		t.Fatal("確認なしで取り消された")
 	}
 
@@ -195,7 +186,7 @@ func TestOperatorCreatesAndRevokesEAB(t *testing.T) {
 	if res.StatusCode != http.StatusSeeOther || !strings.Contains(loc, "done=eab-revoked") {
 		t.Fatalf("取り消し: status = %d, Location = %s", res.StatusCode, loc)
 	}
-	if f := loadEAB(t, e.eabPath); len(f.Keys) != 1 || f.Keys[0].KID == k.KID {
+	if f := e.userKeys(t); len(f) != 1 || f[0].KID == k.KID {
 		t.Fatal("取り消されていない")
 	}
 	if _, page := get(t, op, base+loc); !strings.Contains(page, "EAB 鍵 "+k.KID+" を取り消した") {
@@ -207,7 +198,7 @@ func TestOperatorCreatesAndRevokesEAB(t *testing.T) {
 	}
 	// 名前が不正なら発行しない。
 	_, once2 := formOf(t, op, base+"/eab")
-	if res, _ := post(t, op, base+"/eab/create", url.Values{"csrf": {token}, "once": {once2}, "names": {"bad name!"}}, nil); res.StatusCode != http.StatusBadRequest || len(loadEAB(t, e.eabPath).Keys) != 1 {
+	if res, _ := post(t, op, base+"/eab/create", url.Values{"csrf": {token}, "once": {once2}, "names": {"bad name!"}}, nil); res.StatusCode != http.StatusBadRequest || len(e.userKeys(t)) != 1 {
 		t.Errorf("不正な名前で発行できた: status = %d", res.StatusCode)
 	}
 }
@@ -225,7 +216,7 @@ func TestCreateRejectsWildcardOverlappingAdmins(t *testing.T) {
 			t.Errorf("%s: status = %d", names, res.StatusCode)
 		}
 	}
-	if len(loadEAB(t, e.eabPath).Keys) != 1 {
+	if len(e.userKeys(t)) != 1 {
 		t.Fatal("管理者の名前と重なる鍵が発行された")
 	}
 	// 管理者の名前を完全一致で許可する鍵（管理者の証明書の取得用）は発行できる。
@@ -310,7 +301,7 @@ func TestCSRFProtection(t *testing.T) {
 			t.Errorf("%s: status = %d（403 のはず）", tc.name, res.StatusCode)
 		}
 	}
-	if len(loadEAB(t, e.eabPath).Keys) != 1 {
+	if len(e.userKeys(t)) != 1 {
 		t.Fatal("偽の操作で EAB 鍵が発行された")
 	}
 	// 変更は POST だけ（GET では何もしない）。
@@ -345,7 +336,7 @@ func TestFlashCannotBeSpoofed(t *testing.T) {
 func TestRevokedAdminCertRejected(t *testing.T) {
 	e := startWithOperator(t)
 	base := "https://" + e.addr
-	c, serial := e.clientWithSerial(t, e.issuer, operatorName, true)
+	c, serial := e.clientWithSerial(t, e.issuer, operatorName, true, "")
 	if res, _ := get(t, c, base+"/"); res.StatusCode != http.StatusOK {
 		t.Fatalf("失効前: status = %d", res.StatusCode)
 	}
@@ -359,7 +350,7 @@ func TestRevokedAdminCertRejected(t *testing.T) {
 		t.Error("失効した証明書の拒否が監査ログに残っていない")
 	}
 	// CA の鍵で作られていても、発行の記録が無い証明書は拒否する。
-	c2, _ := e.clientWithSerial(t, e.issuer, adminName, false)
+	c2, _ := e.clientWithSerial(t, e.issuer, adminName, false, "")
 	if res, _ := get(t, c2, base+"/"); res.StatusCode != http.StatusForbidden {
 		t.Errorf("発行の記録が無い証明書で入れた: status = %d", res.StatusCode)
 	}
@@ -413,5 +404,46 @@ func TestNewRequiresRevokeAndWritableDir(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
 	if _, err := admin.New(opts); err == nil || !strings.Contains(err.Error(), "書き込める") {
 		t.Errorf("書き込めないディレクトリで作れた: %v", err)
+	}
+}
+
+// ログインの時点でも、証明書を発行した EAB 鍵が今もその名前を完全一致で許可しているかを確かめる。
+func TestAdminCertRejectedByEABKey(t *testing.T) {
+	e := startWithOperator(t)
+	base := "https://" + e.addr
+
+	// サーバ用のワイルドカードの鍵で発行済みの証明書（例: 後から admin.allowed_clients を広げた場合）。
+	var wildKID string
+	if err := eab.Update(e.eabPath, func(f *eab.File) error {
+		k, err := f.Add([]string{"*.internal.example.com"}, "サーバ群")
+		wildKID = k.KID
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	c, _ := e.clientWithSerial(t, e.issuer, operatorName, true, wildKID)
+	if res, _ := get(t, c, base+"/"); res.StatusCode != http.StatusForbidden {
+		t.Errorf("ワイルドカードの鍵で発行した証明書で入れた: status = %d", res.StatusCode)
+	}
+	if len(auditFind(e, "完全一致で許可していない EAB 鍵で発行した証明書での接続を拒否")) == 0 {
+		t.Error("拒否が監査ログに残っていない")
+	}
+
+	// 完全一致の鍵で発行した証明書は入れるが、その鍵を取り消すとすぐに入れなくなる。
+	c2, _ := e.clientWithSerial(t, e.issuer, adminName, true, "")
+	if res, _ := get(t, c2, base+"/"); res.StatusCode != http.StatusOK {
+		t.Fatalf("完全一致の鍵で発行した証明書で入れない: status = %d", res.StatusCode)
+	}
+	if err := eab.Update(e.eabPath, func(f *eab.File) error {
+		f.Remove(e.adminKey(t, adminName))
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if res, _ := get(t, c2, base+"/"); res.StatusCode != http.StatusForbidden {
+		t.Errorf("取り消した EAB 鍵で発行した証明書で入れた: status = %d", res.StatusCode)
+	}
+	if len(auditFind(e, "取り消した EAB 鍵で発行した証明書での接続を拒否")) == 0 {
+		t.Error("拒否が監査ログに残っていない")
 	}
 }
