@@ -108,7 +108,7 @@ func New(o Options) (*Server, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Server{
 		cfg: o.Config, issuer: o.Issuer, db: o.DB, eab: o.EAB, log: log, validator: v,
-		fed: o.Federation,
+		fed:    o.Federation,
 		nonces: newNonceStore(), allowed: o.Config.AllowedPrefixes(),
 		ctx: ctx, cancel: cancel, crlDirty: true,
 	}, nil
