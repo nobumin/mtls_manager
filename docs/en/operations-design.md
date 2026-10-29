@@ -194,6 +194,10 @@ Admin certificates also expire after 24 hours, so **they must be re-imported int
   (each admin's EAB key must still name the exact name, e.g. `admin1.admins.internal.example.com`).
 - Remove: revoke that admin's certificate (the admin UI's "Issued certificates" page or `mtls-ca revoke`); **the admin is locked out immediately**.
   Revoking that admin's EAB key **also locks them out immediately** (and no new certificate can be obtained). Also, if names are listed individually, remove it from `admin.allowed_clients` (takes effect after a restart).
+- **Be careful not to revoke your own certificate or EAB key.** Revoking your own certificate or EAB key from the admin UI locks you out on the spot.
+  With only one admin in `admin.operators`, nobody can make changes any more. Recover on the CA server:
+  re-create an EAB key for the admin name with `mtlsctl eab create` (9-3, step 2), then re-create mtls-agent's `account_key` with that key and obtain a new certificate (9-3, steps 3–5).
+  For this reason, registering two or more admins in `admin.operators` is recommended.
 
 ### 9-6. Changes from the admin UI
 
