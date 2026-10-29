@@ -84,6 +84,13 @@ type Partner struct {
 	// Expires は連携の有効期限。過ぎたらバンドルに入れない（照合と承認をやり直す）。
 	Expires time.Time `json:"expires,omitzero"`
 
+	// 次のルート（ルート CA の入れ替えの予告で取り込んだもの。設計 11.）。NextState が active なら、新旧の両方を同じ範囲で信頼する。
+	NextRootCert   string    `json:"next_root_cert,omitempty"`
+	NextRootSHA256 string    `json:"next_root_sha256,omitempty"`
+	NextState      string    `json:"next_state,omitempty"`
+	NextSwitchAt   time.Time `json:"next_switch_at,omitzero"`
+	NextExpires    time.Time `json:"next_expires,omitzero"`
+
 	ImportedAt time.Time `json:"imported_at"`
 	Events     []Event   `json:"events,omitempty"`
 }
@@ -130,7 +137,7 @@ func (f *File) Import(id string, rec *Record, root *x509.Certificate, now time.T
 	}
 	fp := Fingerprint(root)
 	for _, p := range f.Partners {
-		if FingerprintEqual(p.RootSHA256, fp) {
+		if FingerprintEqual(p.RootSHA256, fp) || FingerprintEqual(p.NextRootSHA256, fp) {
 			return fmt.Errorf("このルート CA はすでに連携先 %q として取り込んである", p.ID)
 		}
 	}
@@ -200,6 +207,8 @@ func (f *File) Request(id string, o RequestOptions, ownScope []string, now time.
 	if validity < 24*time.Hour || validity > 2*DefaultPartnerValidity {
 		return errors.New("連携の有効期限は 1 日〜2 年")
 	}
+	// 申請し直すとき（停止の後など）は、次のルートも照合し直す（予告を取り込み直す）。
+	p.clearNext()
 	p.State, p.Domains, p.ComparedWith = StateRequested, scope, o.ComparedWith
 	p.RequestedBy, p.RequestedVia, p.RequestedAt = o.By.Name, o.By.Via, now.UTC().Truncate(time.Second)
 	p.ApprovedBy, p.ApprovedVia, p.ApprovedAt = "", "", time.Time{}

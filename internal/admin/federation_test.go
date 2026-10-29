@@ -242,3 +242,65 @@ func TestFederationChannelAndAudit(t *testing.T) {
 		t.Errorf("削除の要約が監査ログに無い: %+v", got[0].Attrs)
 	}
 }
+
+// 管理画面で、ルート CA の入れ替えの予告の取り込み → 次のルートの承認 → 古いルートの廃止を行う。
+func TestFederationRootRotationInAdminUI(t *testing.T) {
+	e, fedFile := startFederation(t)
+	base := "https://" + e.addr
+	oldB, oldKey := testca.NewIssuerWithRootKey(t, "b.example.net")
+	newB := testca.NewIssuer(t, "b.example.net")
+	rec, _ := federation.NewRecord(oldB.Root, []string{"b.example.net"}, "", nil)
+	fp := federation.Fingerprint(oldB.Root)
+	now := time.Now()
+	if err := federation.Update(fedFile, func(f *federation.File) error {
+		if err := f.Import("b-corp", rec, oldB.Root, now, federation.ByCLI("alice")); err != nil {
+			return err
+		}
+		if err := f.Request("b-corp", federation.RequestOptions{Fingerprint: fp, ComparedWith: "電話", By: federation.ByCLI("alice")}, []string{testca.Domain}, now); err != nil {
+			return err
+		}
+		return f.Approve("b-corp", fp, federation.ByCLI("bob"), []string{testca.Domain}, now)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	a, err := federation.NewAnnouncement(oldB.Root, newB.Root, []string{"b.example.net"}, now, 30*24*time.Hour, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compact, err := federation.SignAnnouncement(a, oldB.Root, oldKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	op := noRedirect(e.client(t, e.issuer, operatorName))
+	tok := csrfOf(t, op, base+"/federation")
+	if res, _ := post(t, op, base+"/federation/announce", url.Values{"csrf": {tok}, "id": {"b-corp"}, "announcement": {"x" + compact}}, nil); res.StatusCode != http.StatusBadRequest {
+		t.Errorf("壊れた予告を取り込めた: %d", res.StatusCode)
+	}
+	steps := []struct {
+		path string
+		form url.Values
+		want string
+	}{
+		{"/federation/announce", url.Values{"announcement": {compact}}, federation.NextPending},
+		{"/federation/approve-next", url.Values{"confirm": {"yes"}}, federation.NextActive},
+		{"/federation/retire-root", url.Values{"confirm": {"yes"}}, ""},
+	}
+	for _, s := range steps {
+		s.form.Set("csrf", tok)
+		s.form.Set("id", "b-corp")
+		if res, body := post(t, op, base+s.path, s.form, nil); res.StatusCode != http.StatusSeeOther {
+			t.Fatalf("%s: status = %d %s", s.path, res.StatusCode, body)
+		}
+		f, _ := federation.Load(fedFile)
+		if got := f.Find("b-corp").NextState; got != s.want {
+			t.Fatalf("%s の後の次のルートの状態 = %q（%q のはず）", s.path, got, s.want)
+		}
+	}
+	f, _ := federation.Load(fedFile)
+	if !federation.FingerprintEqual(f.Find("b-corp").RootSHA256, federation.Fingerprint(newB.Root)) {
+		t.Error("古いルートを外した後のルートが新しいものでない")
+	}
+	if len(auditFind(e, "ルート CA の入れ替えの操作をした")) != 2 {
+		t.Error("入れ替えの操作の監査ログが無い")
+	}
+}

@@ -225,7 +225,7 @@ func (a *Agent) writeFederation(partners []federation.TrustedPartner, compact st
 	}
 	keep := map[string]bool{}
 	for _, p := range partners {
-		if err := writeFile(filepath.Join(dir, p.ID+".pem"), pki.EncodeCertsPEM(p.Root), 0o644); err != nil {
+		if err := writeFile(filepath.Join(dir, p.ID+".pem"), pki.EncodeCertsPEM(p.Roots...), 0o644); err != nil {
 			return err
 		}
 		if err := writeFile(filepath.Join(dir, p.ID+".domains"), []byte(strings.Join(p.Domains, "\n")+"\n"), 0o644); err != nil {

@@ -48,8 +48,10 @@
           <tr><th>組織・連絡先</th><td>{{.Organization}} {{join .Contacts ", "}} <span class="badge warn">未検証（相手の申告）</span></td></tr>
           <tr><th>申告された範囲</th><td>{{join .DeclaredDomains ", "}}</td></tr>
           <tr><th>照合した相手と経路</th><td>{{.ComparedWith}}</td></tr>
+          {{if .NextState}}<tr><th>次のルート（入れ替え中）</th><td class="mono">{{.NextFingerprintGroups}}</td></tr>
+          <tr><th>次のルートの状態</th><td>{{if eq .NextState "active"}}承認済み（新旧の両方を信頼している）{{else}}承認待ち{{end}}・切り替えの予定日 {{fmtTime .NextSwitchAt}}</td></tr>{{end}}
         </table>
-        <ul class="muted">{{range .Events}}<li>{{fmtTime .At}} {{.Action}} {{.By}}{{if eq .Via "cli"}}（CLI・自己申告）{{end}} {{.Detail}}</li>{{end}}</ul>
+        <ul class="muted">{{range .Events}}<li>{{fmtTime .At}} {{.Action}} {{.By}}{{if ne .Via "admin-ui"}}（CLI・自己申告）{{end}} {{.Detail}}</li>{{end}}</ul>
         {{if $.Operator}}
           {{if or (eq .State "pending") (eq .State "suspended")}}
           <form class="action" method="post" action="/federation/request">
@@ -78,6 +80,36 @@
           {{else if eq .State "requested"}}
           {{if .RequestedViaCLI}}<p class="muted">CLI で申請された（名前は自己申告）。承認は申請と同じ経路で行うので、画面では承認できない。画面で承認するには、停止してから画面で申請し直す。</p>
           {{else}}<p class="muted">承認待ち。申請者（{{.RequestedBy}}）とは別の管理者が承認する。</p>{{end}}
+          {{end}}
+          {{if eq .State "active"}}
+          {{if not .NextState}}
+          <form class="action" method="post" action="/federation/announce">
+            <input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="id" value="{{.ID}}">
+            <strong>ルート CA の入れ替えの予告を取り込む</strong>
+            <label>連携先から受け取った予告（古いルートで署名したもの）を貼り付ける。署名は、いま信頼しているルートで確かめる（指紋の照合は不要）
+              <textarea name="announcement" rows="3" required></textarea></label>
+            <button type="submit">取り込む</button>
+          </form>
+          {{else if eq .NextState "pending"}}
+          <form class="inline" method="post" action="/federation/approve-next" data-confirm="連携先 {{.ID}} の次のルートを承認する。新旧の両方のルートを同じ範囲で信頼する。">
+            <input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="id" value="{{.ID}}">
+            <label><input type="checkbox" name="confirm" value="yes" required> 確認</label>
+            <button type="submit">次のルートを承認する</button>
+          </form>
+          {{else}}
+          <form class="inline" method="post" action="/federation/retire-root" data-confirm="連携先 {{.ID}} の古いルートを外す。相手が新しいルートで発行し始めてから行う。">
+            <input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="id" value="{{.ID}}">
+            <label><input type="checkbox" name="confirm" value="yes" required> 確認</label>
+            <button type="submit">古いルートを外す</button>
+          </form>
+          {{end}}
+          {{if .NextState}}
+          <form class="inline" method="post" action="/federation/cancel-next" data-confirm="連携先 {{.ID}} の次のルートを取り消す。">
+            <input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="id" value="{{.ID}}">
+            <label><input type="checkbox" name="confirm" value="yes" required> 確認</label>
+            <button type="submit" class="danger">次のルートを取り消す</button>
+          </form>
+          {{end}}
           {{end}}
           {{if ne .State "suspended"}}
           <form class="inline" method="post" action="/federation/suspend" data-confirm="連携先 {{.ID}} を停止する。各サーバは、次のトラストバンドルの取得から相手を信頼しなくなる。">

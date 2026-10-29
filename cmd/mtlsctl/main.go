@@ -22,6 +22,8 @@ import (
 const usage = `使い方:
   ルート CA（オフラインの端末で実行する）
     mtlsctl root create -out-dir DIR -cn NAME [-org ORG] [-key-type ecdsa-p384] [-validity 10y]
+    mtlsctl root announce -old-root-cert F -old-root-key F -new-root-cert F -domains D[,D..] -out F [-switch-at YYYY-MM-DD] [-validity 90d]
+                                   （連携版: ルート CA の入れ替えの予告。古いルートの鍵の侵害時は使わない）
 
   中間 CA
     mtlsctl intermediate csr  -out-dir DIR -cn NAME [-org ORG] [-key-type ecdsa-p256]     （CA サーバで実行）
@@ -41,6 +43,10 @@ const usage = `使い方:
     mtlsctl federation suspend -config FILE -id ID [-reason TEXT]
     mtlsctl federation remove  -config FILE -id ID
     mtlsctl federation list    -config FILE [-id ID]
+    mtlsctl federation announce     -config FILE -id ID -in FILE   （連携先のルート CA の入れ替えの予告を取り込む）
+    mtlsctl federation approve-next -config FILE -id ID            （次のルートを承認する。1 人でよい）
+    mtlsctl federation retire-root  -config FILE -id ID            （古いルートを外す）
+    mtlsctl federation cancel-next  -config FILE -id ID
     （操作した管理者の名前は -by。省略時は SUDO_USER / USER）
 
   その他
@@ -98,6 +104,12 @@ func run(args []string) error {
 		return fedRemove(args[2:])
 	case "federation list":
 		return fedList(args[2:])
+	case "federation announce":
+		return fedAnnounce(args[2:])
+	case "federation approve-next", "federation retire-root", "federation cancel-next":
+		return fedNext(args[1], args[2:])
+	case "root announce":
+		return rootAnnounce(args[2:])
 	}
 	switch args[0] {
 	case "inspect":

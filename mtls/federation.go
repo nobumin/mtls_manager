@@ -201,7 +201,9 @@ func (t *trustStore) verifyConnection(server bool, allowed []string) func(tls.Co
 		partners := t.partners(time.Now())
 		roots := t.ownPool.Clone()
 		for _, p := range partners {
-			roots.AddCert(p.Root)
+			for _, r := range p.Roots {
+				roots.AddCert(r)
+			}
 		}
 		opts := x509.VerifyOptions{Roots: roots, Intermediates: inters, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}}
 		if !server {
@@ -221,7 +223,7 @@ func (t *trustStore) verifyConnection(server bool, allowed []string) func(tls.Co
 				break
 			}
 			for _, p := range partners {
-				if !p.Root.Equal(root) {
+				if !slices.ContainsFunc(p.Roots, root.Equal) {
 					continue
 				}
 				if err := federation.CheckPeer(leaf, p.Domains); err != nil {

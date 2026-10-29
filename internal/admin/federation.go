@@ -42,6 +42,8 @@ type fedRow struct {
 	SelfDeclared bool
 	// RequestedViaCLI は、CLI で申請されたことを表す（画面では承認できない。承認は申請と同じ経路で行う）。
 	RequestedViaCLI bool
+	// NextFingerprintGroups は次のルート（入れ替え中）の指紋（4 桁ずつ）。
+	NextFingerprintGroups string
 }
 
 func (s *Server) federationEnabled() bool { return s.cfg.Federation.File != "" && s.fed != nil }
@@ -62,8 +64,11 @@ func (s *Server) federationData(r *http.Request) (any, error) {
 		row := fedRow{Partner: p, FingerprintGroups: fingerprintGroups(p.RootSHA256)}
 		row.ExpiresWarn = p.State == federation.StateActive && p.Expires.Sub(now) < fedWarnBefore
 		row.RequestedViaCLI = p.RequestedVia != federation.ViaAdmin
+		if p.NextRootSHA256 != "" {
+			row.NextFingerprintGroups = fingerprintGroups(p.NextRootSHA256)
+		}
 		row.CanApprove = p.State == federation.StateRequested && p.RequestedBy != v.Me && !row.RequestedViaCLI
-		row.SelfDeclared = p.RequestedVia == federation.ViaCLI || p.ApprovedVia == federation.ViaCLI
+		row.SelfDeclared = (p.RequestedBy != "" && p.RequestedVia != federation.ViaAdmin) || (p.ApprovedBy != "" && p.ApprovedVia != federation.ViaAdmin)
 		v.Partners = append(v.Partners, row)
 	}
 	return v, nil
@@ -297,4 +302,54 @@ func truncateRunes(s string, n int) string {
 		return string(r[:n])
 	}
 	return s
+}
+
+// handleFedAnnounce は連携先のルート CA の入れ替えの予告を取り込む（署名は、いま信頼しているルートで確かめる）。
+func (s *Server) handleFedAnnounce(w http.ResponseWriter, r *http.Request) {
+	admin, id, ok := s.checkFedPost(w, r, "federation_announce")
+	if !ok {
+		return
+	}
+	compact := strings.TrimSpace(r.PostForm.Get("announcement"))
+	if err := s.fedUpdate(func(f *federation.File) error {
+		return f.ImportAnnouncement(id, compact, federation.ByAdmin(admin), time.Now())
+	}); err != nil {
+		s.log.Warn("管理画面: ルート CA の入れ替えの予告を取り込めない", "category", "audit", "admin", admin, "partner", id, "err", err)
+		s.fail(w, r, "federation", http.StatusBadRequest, "予告を取り込めない: "+err.Error())
+		return
+	}
+	s.log.Info("管理画面: ルート CA の入れ替えの予告を取り込んだ", "category", "audit", "admin", admin, "partner", id)
+	redirectDone(w, r, "/federation", "fed-announced", id)
+}
+
+// handleFedNext は次のルートの承認・古いルートの廃止・次のルートの取り消し（どれも 1 人でできる）。
+func (s *Server) handleFedNext(action string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		admin, id, ok := s.checkFedPost(w, r, "federation_"+action)
+		if !ok {
+			return
+		}
+		if !requireConfirm(r) {
+			s.fail(w, r, "federation", http.StatusBadRequest, "確認のチェックを入れてから操作する")
+			return
+		}
+		actor, now := federation.ByAdmin(admin), time.Now()
+		err := s.fedUpdate(func(f *federation.File) error {
+			switch action {
+			case "approve-next":
+				return f.ApproveNext(id, actor, now)
+			case "retire-root":
+				return f.RetireRoot(id, actor, now)
+			default:
+				return f.CancelNext(id, actor, now)
+			}
+		})
+		if err != nil {
+			s.log.Warn("管理画面: ルート CA の入れ替えの操作ができない", "category", "audit", "admin", admin, "partner", id, "action", action, "err", err)
+			s.fail(w, r, "federation", http.StatusBadRequest, "操作できない: "+err.Error())
+			return
+		}
+		s.log.Warn("管理画面: ルート CA の入れ替えの操作をした", "category", "audit", "admin", admin, "partner", id, "action", action)
+		redirectDone(w, r, "/federation", "fed-"+action, id)
+	}
 }

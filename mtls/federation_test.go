@@ -275,3 +275,47 @@ func TestLibraryRejectsBundleRollback(t *testing.T) {
 		t.Error("古いバンドルに戻されて、停止した連携先を再び信頼した")
 	}
 }
+
+// 連携先のルート CA の入れ替え中は、新旧どちらのルートの証明書も受け入れ、古いルートを外すと新しいほうだけになる。
+func TestFederationRootRotation(t *testing.T) {
+	a := testca.NewIssuer(t, domainA)
+	oldB := testca.NewIssuer(t, domainB)
+	newB := testca.NewIssuer(t, domainB)
+	dirA, dirOld, dirNew := t.TempDir(), t.TempDir(), t.TempDir()
+	srvA := writeLeaf(t, a, dirA, "api."+domainA)
+	cliOld := writeLeaf(t, oldB, dirOld, "web1."+domainB)
+	cliNew := writeLeaf(t, newB, dirNew, "web1."+domainB)
+	bundleA := filepath.Join(dirA, "b.jws")
+	bundleOld, bundleNew := filepath.Join(dirOld, "a.jws"), filepath.Join(dirNew, "a.jws")
+	writeBundle(t, bundleOld, oldB, 1, time.Now().Add(time.Hour), partner("a-corp", a.Root, domainA))
+	writeBundle(t, bundleNew, newB, 1, time.Now().Add(time.Hour), partner("a-corp", a.Root, domainA))
+
+	rotating := partner("b-corp", oldB.Root, domainB)
+	rotating.NextRootCert, rotating.NextRootSHA256 = string(pki.EncodeCertsPEM(newB.Root)), federation.Fingerprint(newB.Root)
+	writeBundle(t, bundleA, a, 1, time.Now().Add(time.Hour), rotating)
+	cfg, err := mtls.NewServerTLSConfig(mtls.Config{
+		CertFile: srvA.cert, KeyFile: srvA.key, CAFile: srvA.ca, TrustBundleFile: bundleA,
+		AllowedPeers: []string{"web1." + domainB}, ReloadInterval: 10 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := startServer(t, cfg)
+	for name, c := range map[string]*http.Client{
+		"古いルート":  fedClient(t, cliOld, bundleOld, "api."+domainA),
+		"新しいルート": fedClient(t, cliNew, bundleNew, "api."+domainA),
+	} {
+		if err := get(c, addr); err != nil {
+			t.Errorf("入れ替え中に%sの証明書で接続できない: %v", name, err)
+		}
+	}
+	// 古いルートを外す（新しいルートだけのバンドル）。
+	writeBundle(t, bundleA, a, 2, time.Now().Add(time.Hour), partner("b-corp", newB.Root, domainB))
+	time.Sleep(50 * time.Millisecond)
+	if err := get(fedClient(t, cliOld, bundleOld, "api."+domainA), addr); err == nil {
+		t.Error("古いルートを外した後も、古いルートの証明書で接続できた")
+	}
+	if err := get(fedClient(t, cliNew, bundleNew, "api."+domainA), addr); err != nil {
+		t.Errorf("古いルートを外した後、新しいルートの証明書で接続できない: %v", err)
+	}
+}

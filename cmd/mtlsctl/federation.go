@@ -321,13 +321,17 @@ func fedList(args []string) error {
 		if p == nil {
 			return fmt.Errorf("連携先 %q が無い", *id)
 		}
-		fmt.Printf("ID:             %s\n状態:           %s\n指紋:           %s\n申告された範囲: %v\n承認した範囲:   %v\n組織・連絡先:   %s %v（未検証）\n照合した相手:   %s\n申請:           %s %s\n承認:           %s %s\n有効期限:       %s\n\n操作の記録:\n",
+		next := "-"
+		if p.NextState != "" {
+			next = fmt.Sprintf("%s（%s、切り替えの予定日 %s）", p.NextRootSHA256, p.NextState, fmtTime(p.NextSwitchAt))
+		}
+		fmt.Printf("ID:             %s\n状態:           %s\n指紋:           %s\n申告された範囲: %v\n承認した範囲:   %v\n組織・連絡先:   %s %v（未検証）\n照合した相手:   %s\n申請:           %s %s\n承認:           %s %s\n有効期限:       %s\n次のルート:     %s\n\n操作の記録:\n",
 			p.ID, p.State, p.RootSHA256, p.DeclaredDomains, p.Domains, p.Organization, p.Contacts, p.ComparedWith,
-			p.RequestedBy, fmtTime(p.RequestedAt), p.ApprovedBy, fmtTime(p.ApprovedAt), fmtTime(p.Expires))
+			p.RequestedBy, fmtTime(p.RequestedAt), p.ApprovedBy, fmtTime(p.ApprovedAt), fmtTime(p.Expires), next)
 		for _, e := range p.Events {
-			via := "管理画面"
-			if e.Via == federation.ViaCLI {
-				via = "CLI・自己申告"
+			via := "CLI・自己申告" // 経路の記録の無い古い操作も CLI とみなす
+			if e.Via == federation.ViaAdmin {
+				via = "管理画面"
 			}
 			fmt.Printf("  %s  %-8s %-12s （%s） %s\n", e.At.Local().Format("2006-01-02 15:04"), e.Action, e.By, via, e.Detail)
 		}
@@ -350,4 +354,141 @@ func fmtTime(t time.Time) string {
 		return "-"
 	}
 	return t.Local().Format("2006-01-02 15:04")
+}
+
+// rootAnnounce はルート CA の入れ替えの予告を作る（オフラインの端末で、古いルート CA の鍵を使う）。
+// 古いルートの鍵の侵害が理由の入れ替えには使わない（連携先には停止と、初回と同じ連携のやり直しを頼む）。
+func rootAnnounce(args []string) error {
+	fs := newFlags("root announce")
+	oldCert := fs.String("old-root-cert", "", "いまのルート CA の証明書")
+	oldKey := fs.String("old-root-key", "", "いまのルート CA の鍵")
+	newCert := fs.String("new-root-cert", "", "新しいルート CA の証明書")
+	var domains []string
+	fs.Var(listFlag{&domains}, "domains", "新しいルートの範囲（連携先に申告している範囲を超えない）")
+	var validity time.Duration = 90 * 24 * time.Hour
+	fs.Var(durationFlag{&validity}, "validity", "予告の有効期限（既定 90d、最大 180d）")
+	switchAt := fs.String("switch-at", "", "新しいルートでの発行に切り替える予定日（YYYY-MM-DD）")
+	out := fs.String("out", "", "書き出すファイル")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if err := required("old-root-cert", *oldCert, "old-root-key", *oldKey, "new-root-cert", *newCert, "out", *out); err != nil {
+		return err
+	}
+	if len(domains) == 0 {
+		return errors.New("-domains は必須")
+	}
+	var at time.Time
+	if *switchAt != "" {
+		var err error
+		if at, err = time.Parse("2006-01-02", *switchAt); err != nil {
+			return fmt.Errorf("-switch-at: %w", err)
+		}
+	}
+	oldRoot, err := pki.LoadCert(*oldCert)
+	if err != nil {
+		return err
+	}
+	key, err := pki.LoadPrivateKey(*oldKey)
+	if err != nil {
+		return err
+	}
+	newRoot, err := pki.LoadCert(*newCert)
+	if err != nil {
+		return err
+	}
+	a, err := federation.NewAnnouncement(oldRoot, newRoot, domains, at, validity, time.Now())
+	if err != nil {
+		return err
+	}
+	compact, err := federation.SignAnnouncement(a, oldRoot, key)
+	if err != nil {
+		return err
+	}
+	if err := pki.WriteFileAtomic(*out, []byte(compact+"\n"), 0o644); err != nil {
+		return err
+	}
+	fmt.Printf("ルート CA の入れ替えの予告を書き出した（秘密情報は含まない）。\n  新しいルートの指紋: %s\n  範囲:               %v\n  予告の有効期限:     %s\n連携先に渡す。連携先は、いま信頼している古いルートで署名を確かめて取り込む（指紋の照合は不要）。\n",
+		a.NewRootSHA256, a.Domains, a.Expires.Local().Format(time.RFC3339))
+	return nil
+}
+
+func fedAnnounce(args []string) error {
+	fs := newFlags("federation announce")
+	configPath := fs.String("config", "", "mtls-ca の設定ファイル")
+	id := fs.String("id", "", "連携先の識別子")
+	in := fs.String("in", "", "連携先から受け取った予告のファイル")
+	by := fs.String("by", "", "操作する管理者の名前")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if err := required("id", *id, "in", *in); err != nil {
+		return err
+	}
+	env, err := loadFedEnv(*configPath)
+	if err != nil {
+		return err
+	}
+	who, err := operator(*by)
+	if err != nil {
+		return err
+	}
+	data, err := os.ReadFile(*in)
+	if err != nil {
+		return err
+	}
+	var p federation.Partner
+	if err := federation.Update(env.file, func(f *federation.File) error {
+		if err := f.ImportAnnouncement(*id, strings.TrimSpace(string(data)), federation.ByCLI(who), time.Now()); err != nil {
+			return err
+		}
+		p = *f.Find(*id)
+		return nil
+	}); err != nil {
+		return err
+	}
+	fmt.Printf("連携先 %s のルート CA の入れ替えの予告を取り込んだ（署名は、いま信頼しているルートで確かめた）。\n  次のルートの指紋: %s\n  切り替えの予定日: %s\n承認すると新旧の両方を信頼する: mtlsctl federation approve-next -config ... -id %s\n", *id, p.NextRootSHA256, fmtTime(p.NextSwitchAt), *id)
+	return nil
+}
+
+// fedNext は approve-next / retire-root / cancel-next（どれも 1 人でできる）。
+func fedNext(action string, args []string) error {
+	fs := newFlags("federation " + action)
+	configPath := fs.String("config", "", "mtls-ca の設定ファイル")
+	id := fs.String("id", "", "連携先の識別子")
+	by := fs.String("by", "", "操作する管理者の名前")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if err := required("id", *id); err != nil {
+		return err
+	}
+	env, err := loadFedEnv(*configPath)
+	if err != nil {
+		return err
+	}
+	who, err := operator(*by)
+	if err != nil {
+		return err
+	}
+	actor, now := federation.ByCLI(who), time.Now()
+	if err := federation.Update(env.file, func(f *federation.File) error {
+		switch action {
+		case "approve-next":
+			return f.ApproveNext(*id, actor, now)
+		case "retire-root":
+			return f.RetireRoot(*id, actor, now)
+		default:
+			return f.CancelNext(*id, actor, now)
+		}
+	}); err != nil {
+		return err
+	}
+	msg := map[string]string{
+		"approve-next": "次のルートを承認した。新旧の両方のルートを同じ範囲で信頼する（各サーバには既定 1 分以内に届く）",
+		"retire-root":  "古いルートを外し、次のルートを今のルートにした",
+		"cancel-next":  "次のルートを取り消した",
+	}[action]
+	fmt.Printf("連携先 %s: %s\n", *id, msg)
+	return nil
 }

@@ -4,6 +4,7 @@ package testca
 
 import (
 	"context"
+	"crypto"
 	"crypto/tls"
 	"crypto/x509"
 	"io"
@@ -221,6 +222,13 @@ func (c *CA) DialContext(ctx context.Context, network, _ string) (net.Conn, erro
 // NewIssuer はテスト用のルート CA と中間 CA を作る。
 func NewIssuer(t testing.TB, permitted ...string) *pki.Issuer {
 	t.Helper()
+	iss, _ := NewIssuerWithRootKey(t, permitted...)
+	return iss
+}
+
+// NewIssuerWithRootKey は NewIssuer と同じで、ルート CA の鍵も返す（ルート CA の入れ替えの予告の試験用）。
+func NewIssuerWithRootKey(t testing.TB, permitted ...string) (*pki.Issuer, crypto.Signer) {
+	t.Helper()
 	rootKey, err := pki.GenerateKey(pki.KeyECDSAP256)
 	if err != nil {
 		t.Fatal(err)
@@ -249,5 +257,5 @@ func NewIssuer(t testing.TB, permitted ...string) *pki.Issuer {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return iss
+	return iss, rootKey
 }
