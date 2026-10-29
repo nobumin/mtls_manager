@@ -22,7 +22,7 @@ Out of scope: meshes of three or more parties (each pair can federate individual
 
 ## 2. Assumptions
 
-- The design assumes the stricter case: **A and B are different organizations (companies)**. The other side's CA is treated as "not under our control".
+- The design assumes the stricter case: **A and B are different organizations (companies)** (decided). A design under this assumption also works as is for separate networks within one company. The other side's CA is treated as "not under our control".
   Simplifications for two networks within the same company are noted in the "In-house" remarks in each section.
 - **A and B use different domains** (e.g. A uses `a.example.com`, B uses `b.example.net`). If they overlap, they cannot federate ([6-3.](#6-3-scope-conditions-no-overlap-not-too-broad)).
 - Application traffic (mTLS) can flow between server A and server B. **CA-to-CA connectivity is not required** (the first federation can be done by hand).
@@ -278,7 +278,8 @@ mtls-agent writes new outputs (the existing `output.ca` stays your own root CA o
   Deleting the file would make nginx fail its configuration test and skip the reload, **keeping the old PEM loaded and continuing to trust the partner**
 - **No PEM mixing your own and partners' root CAs is written** (configurations that merely trust it cannot satisfy S-1 and S-2, and that dangerous setup would become the easiest one)
 - As before, files are written to a temporary file and renamed, and a "command after bundle update" can be run in the same way as `hooks.post_renew`.
-  **If the command fails, mtls-agent logs an error and retries until it succeeds** (so a suspension that never reached nginx does not go unnoticed)
+  **If the command fails, mtls-agent logs an error and retries until it succeeds** (so a suspension that never reached nginx does not go unnoticed). Retries use the same exponential backoff as certificate issuance failures (30 seconds up to 15 minutes, with jitter).
+  While failures continue, `mtls-agent check` returns exit code 1 (so monitoring picks it up)
 
 ## 9. Verification at connection time
 
@@ -420,8 +421,8 @@ The following must be decided before implementation.
 
 | # | Item | Options / recommendation |
 | --- | --- | --- |
-| 1 | Relationship between A and B | Different organizations (this document's assumption) or the same company. If the same company, also consider "sharing the root CA" in item 2 |
-| 2 | Approach for in-house use | Use the federated version, or share the root CA with one intermediate per network (recommended: share; no implementation needed) |
+| 1 | Relationship between A and B | **Decided: design for different organizations** (also usable as is within one company) |
+| 2 | Approach for in-house use | **Decided: use the federated version.** Sharing the root CA with one intermediate per network (the alternative in 2.) remains a simple option that needs no implementation |
 | 3 | Two-person approval | Required by default? (recommended: required; can be turned off in-house) |
 | 4 | Support for nginx etc. | Is the "separate ports" procedure in 9-2 enough, or should a sidecar be provided? |
 | 5 | Automatic CA-to-CA updates (stage 3) | Needed? Does the network allow CA-to-CA traffic? |
