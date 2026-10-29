@@ -375,3 +375,32 @@ func mustJSON(t *testing.T, v any) []byte {
 	}
 	return data
 }
+
+// 承認は申請と同じ経路で行う（画面の名前と CLI の名前は別の名前空間なので、混ぜると 1 人で通せてしまう）。
+func TestApproveRequiresSameChannel(t *testing.T) {
+	b := testca.NewIssuer(t, domainB)
+	rec, _ := federation.NewRecord(b.Root, []string{domainB}, "", nil)
+	fp := federation.Fingerprint(b.Root)
+	own := []string{domainA}
+	now := time.Now()
+	for name, tc := range map[string]struct{ req, appr federation.Actor }{
+		"CLI で申請・画面で承認": {federation.ByCLI("alice"), federation.ByAdmin("admin1.admins.example.com")},
+		"画面で申請・CLI で承認": {federation.ByAdmin("admin1.admins.example.com"), federation.ByCLI("bob")},
+	} {
+		f := &federation.File{}
+		_ = f.Import("b-corp", rec, b.Root, now, tc.req)
+		if err := f.Request("b-corp", federation.RequestOptions{Fingerprint: fp, ComparedWith: "電話", By: tc.req}, own, now); err != nil {
+			t.Fatal(err)
+		}
+		if err := f.Approve("b-corp", fp, tc.appr, own, now); err == nil || !strings.Contains(err.Error(), "同じ経路") {
+			t.Errorf("%s: 承認できた（%v）", name, err)
+		}
+	}
+	// 画面どうし（別の証明書）なら承認できる。
+	f := &federation.File{}
+	_ = f.Import("b-corp", rec, b.Root, now, federation.ByAdmin("a1"))
+	_ = f.Request("b-corp", federation.RequestOptions{Fingerprint: fp, ComparedWith: "電話", By: federation.ByAdmin("a1")}, own, now)
+	if err := f.Approve("b-corp", fp, federation.ByAdmin("a2"), own, now); err != nil {
+		t.Fatalf("画面どうしで承認できない: %v", err)
+	}
+}

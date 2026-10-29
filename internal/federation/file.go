@@ -42,6 +42,14 @@ func ByAdmin(name string) Actor { return Actor{Name: name, Via: ViaAdmin} }
 // ByCLI は mtlsctl からの操作（名前は自己申告）。
 func ByCLI(name string) Actor { return Actor{Name: name, Via: ViaCLI} }
 
+// viaOrCLI は経路を返す（記録の無い古い操作は CLI とみなす）。
+func viaOrCLI(v string) string {
+	if v == "" {
+		return ViaCLI
+	}
+	return v
+}
+
 // Verified は、名前を mTLS の証明書で確かめた操作かを返す。
 func (a Actor) Verified() bool { return a.Via == ViaAdmin }
 
@@ -212,6 +220,14 @@ func (f *File) Approve(id, fingerprint string, by Actor, ownScope []string, now 
 	}
 	if by.Name == "" {
 		return errors.New("承認する管理者の名前が無い")
+	}
+	// 承認は申請と同じ経路で行う。画面の名前（証明書）と CLI の名前（自己申告）は別の名前空間なので、
+	// 経路をまたぐと、同じ人でも別の名前に見えて 2 人の承認を 1 人で通せてしまう。
+	if reqVia := viaOrCLI(p.RequestedVia); viaOrCLI(by.Via) != reqVia {
+		if reqVia == ViaCLI {
+			return errors.New("申請と同じ経路で承認する（この連携先は CLI で申請されたので、CLI で承認するか、管理画面で申請し直す）")
+		}
+		return errors.New("申請と同じ経路で承認する（この連携先は管理画面で申請されたので、管理画面で承認する）")
 	}
 	if by.Name == p.RequestedBy {
 		return fmt.Errorf("申請した管理者（%s）とは別の管理者が承認する", by.Name)

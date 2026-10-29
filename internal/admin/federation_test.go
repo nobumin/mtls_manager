@@ -191,3 +191,54 @@ func TestFederationExpiryWarning(t *testing.T) {
 		t.Error("「連携」画面に警告、または CLI（自己申告）の表示が出ない")
 	}
 }
+
+// CLI で申請された連携先は、画面では承認できない（承認は申請と同じ経路）。削除・停止の失敗と削除の要約は監査ログに残る。
+func TestFederationChannelAndAudit(t *testing.T) {
+	e, fedFile := startFederation(t)
+	base := "https://" + e.addr
+	b := testca.NewIssuer(t, "b.example.net")
+	rec, _ := federation.NewRecord(b.Root, []string{"b.example.net"}, "", nil)
+	fp := federation.Fingerprint(b.Root)
+	now := time.Now()
+	if err := federation.Update(fedFile, func(f *federation.File) error {
+		if err := f.Import("b-corp", rec, b.Root, now, federation.ByCLI("alice")); err != nil {
+			return err
+		}
+		return f.Request("b-corp", federation.RequestOptions{Fingerprint: fp, ComparedWith: "電話", By: federation.ByCLI("alice")}, []string{testca.Domain}, now)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	op2 := noRedirect(e.client(t, e.issuer, operator2Name))
+	tok := csrfOf(t, op2, base+"/federation")
+	if _, page := get(t, op2, base+"/federation"); strings.Contains(page, `action="/federation/approve"`) || !strings.Contains(page, "CLI で申請された") {
+		t.Error("CLI で申請された連携先に承認のフォームが出ている、または案内が無い")
+	}
+	if res, body := post(t, op2, base+"/federation/approve", url.Values{"csrf": {tok}, "id": {"b-corp"}, "fingerprint": {fp}, "confirm": {"yes"}}, nil); res.StatusCode != http.StatusBadRequest || !strings.Contains(body, "同じ経路") {
+		t.Errorf("CLI の申請を画面で承認できた: status = %d", res.StatusCode)
+	}
+
+	// 停止の失敗（存在しない連携先）は監査ログに残る。
+	if res, _ := post(t, op2, base+"/federation/suspend", url.Values{"csrf": {tok}, "id": {"nope"}, "confirm": {"yes"}}, nil); res.StatusCode != http.StatusBadRequest {
+		t.Errorf("存在しない連携先の停止: status = %d", res.StatusCode)
+	}
+	if len(auditFind(e, "連携を停止できない")) == 0 {
+		t.Error("停止の失敗が監査ログに無い")
+	}
+	// 停止して削除すると、記録の要約（指紋・申請者・経路）が監査ログに残る。
+	_, _ = post(t, op2, base+"/federation/suspend", url.Values{"csrf": {tok}, "id": {"b-corp"}, "confirm": {"yes"}}, nil)
+	if res, _ := post(t, op2, base+"/federation/remove", url.Values{"csrf": {tok}, "id": {"b-corp"}, "confirm": {"yes"}}, nil); res.StatusCode != http.StatusSeeOther {
+		t.Fatalf("削除: status = %d", res.StatusCode)
+	}
+	got := auditFind(e, "連携先を消した")
+	if len(got) != 1 {
+		t.Fatalf("削除の監査ログ: %d 件", len(got))
+	}
+	var hasFP, hasReq bool
+	for _, a := range got[0].Attrs {
+		hasFP = hasFP || (a.Key == "fingerprint" && a.Value == fp)
+		hasReq = hasReq || (a.Key == "requested_by" && a.Value == "alice")
+	}
+	if !hasFP || !hasReq {
+		t.Errorf("削除の要約が監査ログに無い: %+v", got[0].Attrs)
+	}
+}

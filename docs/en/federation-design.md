@@ -236,6 +236,7 @@ that it was not substituted (integrity), and that is confirmed by the fingerprin
 - Two-person approval is required, including in-house (no setting to make it one person; decided)
 - The admin UI (stage 2) checks the admin name with the login certificate (mTLS). In the CLI (`mtlsctl federation request / approve`), the admin name (`-by`) is self-declared,
   and only "requester and approver have different names" is checked. Records keep the channel (admin UI / CLI), and partners involving the CLI are marked in the UI
+- Approval must use the same channel (admin UI / CLI) as the request. Across channels, admins are named differently (certificate names vs. self-declared names), so one person could appear as two names and pass the two-person approval alone
 - Requests, approvals and rejections are all audit-logged (admin name, partner, fingerprint, scope, whom it was compared with and over which channel)
 - An expiry (default 1 year) is set; warnings appear in the admin UI and logs from 30 days before. Renewal repeats 7-3 and 7-4 (re-comparison)
 

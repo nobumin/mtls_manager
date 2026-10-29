@@ -145,6 +145,7 @@ The partner approves A the same way (traffic flows **only after both sides appro
 **The admin UI's "Federation" page offers the same operations (import, request, approve, suspend, remove, and exporting your own record). It is the recommended way.**
 The admin UI checks the operating admin's name with the certificate used to log in (mTLS), so it guarantees that requester and approver really are different people.
 The fingerprint fields do not accept pasting; type the fingerprint while hearing it read aloud.
+**Approval must use the same channel as the request** (UI requests are approved in the UI, CLI requests in the CLI). The UI and the CLI name admins differently (certificate names vs. self-declared names), and mixing them would let one person pass the two-person approval.
 
 > In the CLI, the `-by` name is self-declared (two-person approval only checks that the names differ). Partners requested or approved via the CLI
 > are marked "includes CLI (self-declared)" in the admin UI. Restrict who can log in to the CA server and review the record of operations (`federation list -id`) regularly.
@@ -191,7 +192,7 @@ sudo mtlsctl federation suspend -config /etc/mtls-ca/config.yaml -id b-corp -rea
 One person can suspend immediately. Servers receive it within 1 minute by default, and the PEM in `federation_dir` is replaced with a "PEM that chains to nothing".
 **If traffic between the CA and the servers is blocked, trust may remain until the trust bundle expires (2 days by default) in the worst case.**
 In urgent cases, also remove the partner's names from each application's `AllowedPeers` (the allowlist for nginx).
-Resuming requires the comparison and two-person approval again (step 3). Remove a partner that is no longer needed with `mtlsctl federation remove`.
+Resuming requires the comparison and two-person approval again (step 3). Remove a partner that is no longer needed with `mtlsctl federation remove`. Removing also deletes its record of operations from the file, so save it first with `mtlsctl federation list -config ... -id <id>` (a summary remains in the audit log).
 
 ### Monitoring
 

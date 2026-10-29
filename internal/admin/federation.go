@@ -40,6 +40,8 @@ type fedRow struct {
 	CanApprove bool
 	// SelfDeclared は、申請か承認が CLI（名前が自己申告）で行われたことを表す。
 	SelfDeclared bool
+	// RequestedViaCLI は、CLI で申請されたことを表す（画面では承認できない。承認は申請と同じ経路で行う）。
+	RequestedViaCLI bool
 }
 
 func (s *Server) federationEnabled() bool { return s.cfg.Federation.File != "" && s.fed != nil }
@@ -59,7 +61,8 @@ func (s *Server) federationData(r *http.Request) (any, error) {
 	for _, p := range f.Partners {
 		row := fedRow{Partner: p, FingerprintGroups: fingerprintGroups(p.RootSHA256)}
 		row.ExpiresWarn = p.State == federation.StateActive && p.Expires.Sub(now) < fedWarnBefore
-		row.CanApprove = p.State == federation.StateRequested && p.RequestedBy != v.Me
+		row.RequestedViaCLI = p.RequestedVia != federation.ViaAdmin
+		row.CanApprove = p.State == federation.StateRequested && p.RequestedBy != v.Me && !row.RequestedViaCLI
 		row.SelfDeclared = p.RequestedVia == federation.ViaCLI || p.ApprovedVia == federation.ViaCLI
 		v.Partners = append(v.Partners, row)
 	}
@@ -138,6 +141,7 @@ func (s *Server) handleFedImport(w http.ResponseWriter, r *http.Request) {
 	if err := s.fedUpdate(func(f *federation.File) error {
 		return f.Import(id, rec, root, time.Now(), federation.ByAdmin(admin))
 	}); err != nil {
+		s.log.Warn("管理画面: 連携先を取り込めない", "category", "audit", "admin", admin, "partner", id, "err", err)
 		s.fail(w, r, "federation", http.StatusBadRequest, "取り込めない: "+err.Error())
 		return
 	}
@@ -212,6 +216,7 @@ func (s *Server) handleFedSuspend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.fedUpdate(func(f *federation.File) error { return f.Suspend(id, federation.ByAdmin(admin), reason, time.Now()) }); err != nil {
+		s.log.Warn("管理画面: 連携を停止できない", "category", "audit", "admin", admin, "partner", id, "err", err)
 		s.fail(w, r, "federation", http.StatusBadRequest, "停止できない: "+err.Error())
 		return
 	}
@@ -228,11 +233,22 @@ func (s *Server) handleFedRemove(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, "federation", http.StatusBadRequest, "確認のチェックを入れてから消す")
 		return
 	}
-	if err := s.fedUpdate(func(f *federation.File) error { return f.Remove(id) }); err != nil {
+	var removed federation.Partner
+	if err := s.fedUpdate(func(f *federation.File) error {
+		if p := f.Find(id); p != nil {
+			removed = *p
+		}
+		return f.Remove(id)
+	}); err != nil {
+		s.log.Warn("管理画面: 連携先を消せない", "category", "audit", "admin", admin, "partner", id, "err", err)
 		s.fail(w, r, "federation", http.StatusBadRequest, "消せない: "+err.Error())
 		return
 	}
-	s.log.Warn("管理画面: 連携先を消した", "category", "audit", "admin", admin, "partner", id)
+	// 連携先の操作の記録はファイルから消えるので、要約を監査ログに残す。
+	s.log.Warn("管理画面: 連携先を消した", "category", "audit", "admin", admin, "partner", id,
+		"fingerprint", removed.RootSHA256, "domains", removed.Domains, "state", removed.State,
+		"requested_by", removed.RequestedBy, "requested_via", removed.RequestedVia,
+		"approved_by", removed.ApprovedBy, "approved_via", removed.ApprovedVia, "compared_with", removed.ComparedWith)
 	redirectDone(w, r, "/federation", "fed-removed", id)
 }
 

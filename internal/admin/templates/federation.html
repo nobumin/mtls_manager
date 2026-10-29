@@ -76,7 +76,8 @@
             <button type="submit">承認する</button>
           </form>
           {{else if eq .State "requested"}}
-          <p class="muted">承認待ち。申請者（{{.RequestedBy}}）とは別の管理者が承認する。</p>
+          {{if .RequestedViaCLI}}<p class="muted">CLI で申請された（名前は自己申告）。承認は申請と同じ経路で行うので、画面では承認できない。画面で承認するには、停止してから画面で申請し直す。</p>
+          {{else}}<p class="muted">承認待ち。申請者（{{.RequestedBy}}）とは別の管理者が承認する。</p>{{end}}
           {{end}}
           {{if ne .State "suspended"}}
           <form class="inline" method="post" action="/federation/suspend" data-confirm="連携先 {{.ID}} を停止する。各サーバは、次のトラストバンドルの取得から相手を信頼しなくなる。">
