@@ -26,6 +26,7 @@ import (
 
 	"github.com/nobumin/mtls_manager/internal/config"
 	"github.com/nobumin/mtls_manager/internal/eab"
+	"github.com/nobumin/mtls_manager/internal/federation"
 	"github.com/nobumin/mtls_manager/internal/pki"
 	"github.com/nobumin/mtls_manager/internal/store"
 )
@@ -57,6 +58,8 @@ type Options struct {
 	EAB       *eab.Store
 	Logger    *slog.Logger
 	Validator *Validator // nil なら Config から作る
+	// Federation は連携版のトラストバンドル（nil なら /federation/bundle は 404）。
+	Federation *federation.Builder
 }
 
 // Server は ACME サーバ。
@@ -67,6 +70,7 @@ type Server struct {
 	eab       *eab.Store
 	log       *slog.Logger
 	validator *Validator
+	fed       *federation.Builder
 	nonces    *nonceStore
 	allowed   []netip.Prefix
 
@@ -104,6 +108,7 @@ func New(o Options) (*Server, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Server{
 		cfg: o.Config, issuer: o.Issuer, db: o.DB, eab: o.EAB, log: log, validator: v,
+		fed: o.Federation,
 		nonces: newNonceStore(), allowed: o.Config.AllowedPrefixes(),
 		ctx: ctx, cancel: cancel, crlDirty: true,
 	}, nil
@@ -152,6 +157,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST "+pathCert+"{serial}", s.post(false, s.handleCert))
 	mux.HandleFunc("POST "+pathRevoke, s.post(false, s.handleRevoke))
 	mux.HandleFunc("GET "+pathCRL, s.handleCRL)
+	mux.HandleFunc("GET "+pathFederationBundle, s.handleFederationBundle)
 	mux.HandleFunc("GET "+pathHealth, func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok\n")) })
 	return s.restrictSource(s.acmeHeaders(mux))
 }

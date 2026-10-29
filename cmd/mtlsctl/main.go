@@ -1,4 +1,4 @@
-// mtlsctl は CA の鍵・証明書と EAB 鍵を管理するコマンド。
+// mtlsctl は CA の鍵・証明書と EAB 鍵、連携版の連携先を管理するコマンド。
 package main
 
 import (
@@ -32,6 +32,16 @@ const usage = `使い方:
     mtlsctl eab create -file FILE -names web1.internal.example.com[,..] [-note TEXT] [-hmac-out FILE]
     mtlsctl eab list   -file FILE
     mtlsctl eab revoke -file FILE -kid KID
+
+  連携版（別々の mtls-ca で管理するサーバ間の mTLS。-config は mtls-ca の設定ファイル）
+    mtlsctl federation export  -config FILE [-org ORG] [-contacts ..] [-domains ..] [-out FILE]
+    mtlsctl federation import  -config FILE -in FILE -id ID
+    mtlsctl federation request -config FILE -id ID -compared-with TEXT [-fingerprint FP] [-domains ..] [-validity 1y]  （1 人目）
+    mtlsctl federation approve -config FILE -id ID [-fingerprint FP]                                                  （別の管理者）
+    mtlsctl federation suspend -config FILE -id ID [-reason TEXT]
+    mtlsctl federation remove  -config FILE -id ID
+    mtlsctl federation list    -config FILE [-id ID]
+    （操作した管理者の名前は -by。省略時は SUDO_USER / USER）
 
   その他
     mtlsctl inspect FILE    証明書の内容を表示する
@@ -74,6 +84,20 @@ func run(args []string) error {
 		return eabList(args[2:])
 	case "eab revoke":
 		return eabRevoke(args[2:])
+	case "federation export":
+		return fedExport(args[2:])
+	case "federation import":
+		return fedImport(args[2:])
+	case "federation request":
+		return fedRequest(args[2:])
+	case "federation approve":
+		return fedApprove(args[2:])
+	case "federation suspend":
+		return fedSuspend(args[2:])
+	case "federation remove":
+		return fedRemove(args[2:])
+	case "federation list":
+		return fedList(args[2:])
 	}
 	switch args[0] {
 	case "inspect":
