@@ -87,6 +87,7 @@ Follow the [getting started guide](docs/en/getting-started.md):
 | [Operations guide](docs/en/operations.md) | Adding/removing servers, revocation, intermediate rotation, backup, monitoring, troubleshooting |
 | [Operations design guide (detailed)](docs/en/operations-design.md) | Network design, what is automated, admin UI, monitoring, failure and incident response, backup, pre-deployment checklist |
 | [Security design](docs/en/security.md) | Threat model, what is and is not protected, recommendations |
+| [Federation design (proposal)](docs/en/federation-design.md) | mTLS between servers managed by separate mtls-managers (scoped mutual trust of root CAs). Not implemented yet |
 | [SECURITY.md](SECURITY.md) | How to report vulnerabilities |
 
 ## Handling of secrets

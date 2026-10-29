@@ -87,6 +87,7 @@ GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -o dist/ ./cmd/...
 | [運用ガイド](docs/ja/operations.md) | サーバの追加・取り消し、失効、中間 CA の更新、バックアップ、監視、トラブル対応 |
 | [運用設計ガイド（詳細版）](docs/ja/operations-design.md) | ネットワーク設計、自動化の範囲、管理画面、監視、障害・事故への対応、バックアップ、導入前のチェックリスト |
 | [セキュリティ設計](docs/ja/security.md) | 想定する脅威、守れること・守れないこと、推奨事項 |
+| [連携版の設計（設計案）](docs/ja/federation-design.md) | 別々の mtls-manager で管理するサーバ間の mTLS（ルート CA の範囲付きの相互信頼）。未実装 |
 | [SECURITY.md](SECURITY.md) | 脆弱性の報告方法 |
 
 ## 秘密情報の扱い
