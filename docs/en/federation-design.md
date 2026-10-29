@@ -304,7 +304,9 @@ mtls-agent writes new outputs (the existing `output.ca` stays your own root CA o
   3. A chain to a partner's root is a candidate only if the certificate meets the "accepted certificate shapes" in 6-2 and **all** of its DNS names fall within
      that root's scope. With several chains, any one satisfying this is enough
   4. Check the peer names with `AllowedPeers` (as before)
-- The client side (the connecting side) performs the same verification (step 3 in addition to the normal hostname verification)
+- The client side (the connecting side) performs the same verification (step 3 in addition to the normal hostname verification). **Connecting by host name (DNS name) is required** (connecting to an IP address puts no server name in SNI, so the host name cannot be checked and the connection is rejected; set `tls.Config.ServerName` to connect)
+- On the server side, `AllowAnyPeer` (an empty `AllowedPeers`) applies only to peers chaining to your own root. Partner peers must always match `AllowedPeers` (so trust does not silently extend outside your organization)
+- Replacement with an older bundle (sequence going back within the same epoch, or a new epoch without a newer issue time) is rejected and the previous one keeps being used (compared in memory; after a restart, mtls-agent's comparison covers it)
 - Rejection reasons (outside scope, wildcard, non-DNS SAN, unapproved root, expired) are included in errors so logs show the cause
 
 ### 9-2. Other than the `mtls` library (nginx etc.)

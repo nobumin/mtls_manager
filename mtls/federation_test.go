@@ -4,6 +4,7 @@ import (
 	"crypto/x509"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -127,7 +128,7 @@ func TestFederationExpiredBundle(t *testing.T) {
 	bundleA, bundleB := filepath.Join(dirA, "b.jws"), filepath.Join(dirB, "b.jws")
 	writeBundle(t, bundleA, a, 1, time.Now().Add(-time.Second), partner("b-corp", b.Root, domainB))
 	writeBundle(t, bundleB, b, 1, time.Now().Add(time.Hour), partner("a-corp", a.Root, domainA))
-	cfg, err := mtls.NewServerTLSConfig(mtls.Config{CertFile: srvA.cert, KeyFile: srvA.key, CAFile: srvA.ca, TrustBundleFile: bundleA, AllowAnyPeer: true})
+	cfg, err := mtls.NewServerTLSConfig(mtls.Config{CertFile: srvA.cert, KeyFile: srvA.key, CAFile: srvA.ca, TrustBundleFile: bundleA, AllowedPeers: []string{"app." + domainA, "web1." + domainB}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +163,7 @@ func TestFederationRejectsBadBundles(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			bundle := filepath.Join(t.TempDir(), "a.jws")
 			write(bundle)
-			cfg, err := mtls.NewServerTLSConfig(mtls.Config{CertFile: srvA.cert, KeyFile: srvA.key, CAFile: srvA.ca, TrustBundleFile: bundle, AllowAnyPeer: true})
+			cfg, err := mtls.NewServerTLSConfig(mtls.Config{CertFile: srvA.cert, KeyFile: srvA.key, CAFile: srvA.ca, TrustBundleFile: bundle, AllowedPeers: []string{"x.evil.example.org"}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -184,12 +185,93 @@ func TestFederationRequiresNameConstraints(t *testing.T) {
 	bundleA, bundleB := filepath.Join(dirA, "b.jws"), filepath.Join(dirB, "b.jws")
 	writeBundle(t, bundleA, a, 1, time.Now().Add(time.Hour), partner("b-corp", b.Root, domainB))
 	writeBundle(t, bundleB, b, 1, time.Now().Add(time.Hour), partner("a-corp", a.Root, domainA))
-	cfg, err := mtls.NewServerTLSConfig(mtls.Config{CertFile: srvA.cert, KeyFile: srvA.key, CAFile: srvA.ca, TrustBundleFile: bundleA, AllowAnyPeer: true})
+	cfg, err := mtls.NewServerTLSConfig(mtls.Config{CertFile: srvA.cert, KeyFile: srvA.key, CAFile: srvA.ca, TrustBundleFile: bundleA, AllowedPeers: []string{"web1." + domainB}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	addr := startServer(t, cfg)
 	if err := get(fedClient(t, cliB, bundleB, "api."+domainA), addr); err == nil {
 		t.Error("名前制約の無い中間 CA で連携先を信頼した")
+	}
+}
+
+// 連携版のクライアントは、IP アドレスでの接続（ホスト名を確かめられない）を拒否する（実装 1）。
+func TestFederatedClientRejectsIPConnection(t *testing.T) {
+	a := testca.NewIssuer(t, domainA)
+	b := testca.NewIssuer(t, domainB)
+	dirA, dirB := t.TempDir(), t.TempDir()
+	cliA := writeLeaf(t, a, dirA, "app."+domainA)
+	srvB := writeLeaf(t, b, dirB, "web1."+domainB) // IP SAN なし
+	bundleA, bundleB := filepath.Join(dirA, "b.jws"), filepath.Join(dirB, "a.jws")
+	writeBundle(t, bundleA, a, 1, time.Now().Add(time.Hour), partner("b-corp", b.Root, domainB))
+	writeBundle(t, bundleB, b, 1, time.Now().Add(time.Hour), partner("a-corp", a.Root, domainA))
+	cfg, err := mtls.NewServerTLSConfig(mtls.Config{CertFile: srvB.cert, KeyFile: srvB.key, CAFile: srvB.ca, TrustBundleFile: bundleB, AllowedPeers: []string{"app." + domainA}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := startServer(t, cfg)
+	// IP アドレスで接続すると、サーバ名が空になるので拒否する（従来のクライアントと同じく通さない）。
+	err = get(fedClient(t, cliA, bundleA, ""), addr)
+	if err == nil || !strings.Contains(err.Error(), "ホスト名") {
+		t.Errorf("IP アドレスでの接続を拒否しない: %v", err)
+	}
+	// 別のホスト名を名乗る接続も拒否する（ホスト名を確かめている）。
+	if err := get(fedClient(t, cliA, bundleA, "api."+domainA), addr); err == nil {
+		t.Error("証明書と違うホスト名で接続できた")
+	}
+	// ホスト名で接続すれば通る。
+	if err := get(fedClient(t, cliA, bundleA, "web1."+domainB), addr); err != nil {
+		t.Errorf("ホスト名で接続できない: %v", err)
+	}
+}
+
+// AllowAnyPeer は自分の組織の相手にだけ効き、連携先の相手は AllowedPeers に一致しなければ拒否する（実装 2）。
+func TestAllowAnyPeerDoesNotExtendToPartners(t *testing.T) {
+	a := testca.NewIssuer(t, domainA)
+	b := testca.NewIssuer(t, domainB)
+	dirA, dirB := t.TempDir(), t.TempDir()
+	srvA := writeLeaf(t, a, dirA, "api."+domainA)
+	ownA := writeLeaf(t, a, dirA, "app."+domainA)
+	cliB := writeLeaf(t, b, dirB, "web1."+domainB)
+	bundleA, bundleB := filepath.Join(dirA, "b.jws"), filepath.Join(dirB, "a.jws")
+	writeBundle(t, bundleA, a, 1, time.Now().Add(time.Hour), partner("b-corp", b.Root, domainB))
+	writeBundle(t, bundleB, b, 1, time.Now().Add(time.Hour), partner("a-corp", a.Root, domainA))
+	cfg, err := mtls.NewServerTLSConfig(mtls.Config{CertFile: srvA.cert, KeyFile: srvA.key, CAFile: srvA.ca, TrustBundleFile: bundleA, AllowAnyPeer: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := startServer(t, cfg)
+	if err := get(fedClient(t, ownA, bundleA, "api."+domainA), addr); err != nil {
+		t.Errorf("自分の組織の相手を AllowAnyPeer で受け入れない: %v", err)
+	}
+	if err := get(fedClient(t, cliB, bundleB, "api."+domainA), addr); err == nil {
+		t.Error("AllowAnyPeer で連携先の相手を受け入れた")
+	}
+}
+
+// ファイルを古いバンドル（停止の前のもの）に戻されても、受け入れない（実装 3）。
+func TestLibraryRejectsBundleRollback(t *testing.T) {
+	a := testca.NewIssuer(t, domainA)
+	b := testca.NewIssuer(t, domainB)
+	dirA, dirB := t.TempDir(), t.TempDir()
+	srvA := writeLeaf(t, a, dirA, "api."+domainA)
+	cliB := writeLeaf(t, b, dirB, "web1."+domainB)
+	bundleA, bundleB := filepath.Join(dirA, "b.jws"), filepath.Join(dirB, "a.jws")
+	writeBundle(t, bundleB, b, 1, time.Now().Add(time.Hour), partner("a-corp", a.Root, domainA))
+	// 停止した後のバンドル（連番 2、連携先なし）。
+	writeBundle(t, bundleA, a, 2, time.Now().Add(time.Hour))
+	cfg, err := mtls.NewServerTLSConfig(mtls.Config{
+		CertFile: srvA.cert, KeyFile: srvA.key, CAFile: srvA.ca, TrustBundleFile: bundleA,
+		AllowedPeers: []string{"web1." + domainB}, ReloadInterval: 10 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := startServer(t, cfg)
+	// 停止の前のバンドル（連番 1、連携先あり）に戻す。
+	writeBundle(t, bundleA, a, 1, time.Now().Add(time.Hour), partner("b-corp", b.Root, domainB))
+	time.Sleep(50 * time.Millisecond)
+	if err := get(fedClient(t, cliB, bundleB, "api."+domainA), addr); err == nil {
+		t.Error("古いバンドルに戻されて、停止した連携先を再び信頼した")
 	}
 }

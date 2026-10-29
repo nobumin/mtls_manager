@@ -59,10 +59,12 @@ type Config struct {
 	// 指定するとホスト名の検証に加えて相手の名前を確かめる。
 	AllowedPeers []string
 	// AllowAnyPeer を true にすると、同じ CA が発行した証明書を持つ相手をすべて許可する（非推奨）。
+	// TrustBundleFile を指定しても、AllowAnyPeer が効くのは自分のルート CA につながる相手だけ（連携先の相手は AllowedPeers に一致すること）。
 	AllowAnyPeer bool
 
 	// TrustBundleFile は連携版のトラストバンドル（mtls-agent の output.trust_bundle）。指定すると、CAFile のルート CA に加えて、
 	// 承認済みの連携先のルート CA を、その範囲の名前に限って信頼する（任意）。CertFile には fullchain を指定する。
+	// クライアント側では、ホスト名（DNS 名）で接続する（IP アドレスでの接続はホスト名を確かめられないので拒否する）。
 	TrustBundleFile string
 	// OwnDomains は自分の範囲を狭める（任意）。自分の範囲は自分の中間 CA の名前制約から得るので、通常は指定しない。
 	// 名前制約より広い値は使えない。

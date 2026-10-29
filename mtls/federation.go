@@ -105,6 +105,16 @@ func (t *trustStore) reload(now time.Time) {
 func (t *trustStore) reloadLocked(now time.Time) {
 	t.lastCheck = now
 	v, err := t.load(now)
+	// 古いバンドル（停止の前のもの等）にファイルを戻されても、受け入れない（mtls-agent と同じ比較。設計 9-1）。
+	if err == nil && t.accepted != nil {
+		prev, b := t.accepted.Bundle, v.Bundle
+		switch {
+		case b.Epoch == prev.Epoch && b.Seq < prev.Seq:
+			err = fmt.Errorf("古いトラストバンドル（連番 %d < %d）", b.Seq, prev.Seq)
+		case b.Epoch != prev.Epoch && !b.IssuedAt.After(prev.IssuedAt):
+			err = fmt.Errorf("エポックが変わったのに、発行時刻（%s）が直前のもの（%s）より新しくない", b.IssuedAt, prev.IssuedAt)
+		}
+	}
 	switch {
 	case err == nil:
 		if t.accepted == nil || v.Bundle.Epoch != t.accepted.Bundle.Epoch || v.Bundle.Seq != t.accepted.Bundle.Seq {
@@ -178,6 +188,11 @@ func (t *trustStore) verifyConnection(server bool, allowed []string) func(tls.Co
 		if len(cs.PeerCertificates) == 0 {
 			return errors.New("mtls: 相手が証明書を提示しなかった")
 		}
+		// クライアント側の ServerName は SNI に載せた名前で、IP アドレスに接続すると空になる（Go は IP を SNI に載せない）。
+		// 空のまま検証するとホスト名を確かめないことになるので、拒否する。
+		if !server && cs.ServerName == "" {
+			return errors.New("mtls: 連携版のクライアントは、ホスト名（DNS 名）で接続する（IP アドレスでの接続はホスト名を確かめられない。tls.Config.ServerName を指定する）")
+		}
 		leaf := cs.PeerCertificates[0]
 		inters := x509.NewCertPool()
 		for _, c := range cs.PeerCertificates[1:] {
@@ -198,11 +213,11 @@ func (t *trustStore) verifyConnection(server bool, allowed []string) func(tls.Co
 			return fmt.Errorf("mtls: 相手の証明書を検証できない: %w", err)
 		}
 		var reasons []string
-		accepted := false
+		viaOwn, viaPartner := false, false
 		for _, chain := range chains {
 			root := chain[len(chain)-1]
 			if slices.ContainsFunc(t.ownRoots, root.Equal) {
-				accepted = true
+				viaOwn = true
 				break
 			}
 			for _, p := range partners {
@@ -213,12 +228,10 @@ func (t *trustStore) verifyConnection(server bool, allowed []string) func(tls.Co
 					reasons = append(reasons, fmt.Sprintf("連携先 %s: %v", p.ID, err))
 					continue
 				}
-				accepted = true
-			}
-			if accepted {
-				break
+				viaPartner = true
 			}
 		}
+		accepted := viaOwn || viaPartner
 		if !accepted {
 			if len(reasons) == 0 {
 				reasons = append(reasons, "信頼するルート CA につながらない")
@@ -227,6 +240,11 @@ func (t *trustStore) verifyConnection(server bool, allowed []string) func(tls.Co
 		}
 		if len(allowed) > 0 {
 			return VerifyPeer(allowed)(cs)
+		}
+		// AllowAnyPeer（サーバ側で AllowedPeers が空）は、自分のルートにつながる相手だけに効く。
+		// 連携先の相手は、必ず AllowedPeers に一致すること（信頼が黙って組織の外へ広がらないように）。
+		if server && !viaOwn {
+			return fmt.Errorf("mtls: 連携先の相手 %v は AllowedPeers に一致しない（AllowAnyPeer は自分の組織の相手にだけ効く）", leaf.DNSNames)
 		}
 		return nil
 	}

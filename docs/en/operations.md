@@ -168,6 +168,9 @@ mtls-agent fetches the trust bundle from the CA every minute by default, verifie
   })
   ```
 
+  - Always list partner peers in `AllowedPeers` (`AllowAnyPeer` applies only to peers in your own organization).
+  - Clients must **connect by host name (DNS name)**. Connections by IP address cannot have their host name checked and are rejected (set `tls.Config.ServerName` to connect).
+
 - **nginx etc.**: they cannot check scopes, so **use a separate port for connections from the partner**, trust only
   `federation_dir/<id>.pem` (that partner's root CA) there, and allow the partner's names as **exact names** (no wildcards).
   At setup and after a suspension, confirm that `nginx -t` passes and that connections from the partner are rejected after the reload.
