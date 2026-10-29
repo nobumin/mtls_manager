@@ -100,6 +100,7 @@ func New(o Options) (*Server, error) {
 	} else if n > 0 {
 		log.Info("確認の途中で止まっていたチャレンジを pending に戻した", "count", n)
 	}
+	warnAdminOverlaps(log, o.EAB, o.Config.Admin.AllowedClients)
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Server{
 		cfg: o.Config, issuer: o.Issuer, db: o.DB, eab: o.EAB, log: log, validator: v,
@@ -319,4 +320,22 @@ func randomID(n int) string {
 		panic(err)
 	}
 	return base64.RawURLEncoding.EncodeToString(b)
+}
+
+// warnAdminOverlaps は、管理者の名前と重なるワイルドカードを持つ EAB 鍵を警告する。
+// そうした鍵でも管理者の名前の証明書は発行しない（checkNames）が、意図しない設定の可能性が高い。
+func warnAdminOverlaps(log *slog.Logger, store *eab.Store, admins []string) {
+	if len(admins) == 0 {
+		return
+	}
+	keys, err := store.Keys()
+	if err != nil {
+		return
+	}
+	for _, k := range keys {
+		if ov := k.WildcardOverlaps(admins); len(ov) > 0 {
+			log.Warn("EAB 鍵のワイルドカードが管理者の名前と重なっている（この鍵では管理者の名前の証明書は発行しない。管理者の名前はサーバと別のサブドメインにする）",
+				"eab_kid", k.KID, "note", k.Note, "patterns", ov, "admin_clients", admins)
+		}
+	}
 }

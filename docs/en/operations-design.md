@@ -137,6 +137,7 @@ The flow for 24-hour certificates:
 - Setting `admin.listen` makes mtls-ca start the admin UI on a port separate from ACME.
 - It shows the overview, issued certificates, EAB keys and logs. Admins matching `admin.operators` can also **issue and revoke EAB keys and revoke certificates** ([9-6](#9-6-changes-from-the-admin-ui)). Without it, everyone is read-only.
 - **Login is mTLS.** Only client certificates issued by this CA whose names match `admin.allowed_clients` get in. No passwords.
+- **Revoked admin certificates cannot get in.** The admin UI runs in the same process as the CA and has the issuance records, so it checks them on every connection without using the CRL. Certificates with no issuance record at this CA are rejected too.
 - Every page view and every change is recorded in the **audit log** (`category=audit`, with the admin name, path and source). Connections rejected
   by certificate (none, another CA, a name not allowed) are logged as warnings with source and reason.
 - Secrets such as keys and HMACs are never shown (the one exception: the HMAC of a newly issued EAB key is shown once, right after issuing it). No external scripts or styles are loaded (enforced by CSP).
@@ -153,8 +154,10 @@ The admin UI's TLS certificate is issued for the CA's host names (`hostnames`), 
 
 ### 9-3. Preparing an admin certificate
 
-1. Choose a name per admin (e.g. `admin1.internal.example.com`), add it to `admin.allowed_clients` and restart mtls-ca.
-2. Create an EAB key for that name (`mtlsctl eab create -names admin1.internal.example.com -note "admin 1"`).
+1. Choose a name per admin (e.g. `admin1.admins.internal.example.com`), add it to `admin.allowed_clients` and restart mtls-ca.
+   **Put admin names in a subdomain separate from the servers (e.g. `admins.internal.example.com`)** (see the note below).
+2. Create an EAB key that names it **without a wildcard** (`mtlsctl eab create -names admin1.admins.internal.example.com -note "admin 1"`).
+   Certificates for admin names are issued only with EAB keys that permit that exact name.
 3. Run mtls-agent on the admin machine (Linux / macOS) to obtain the certificate. The CA must be able to reach port 80 (or 443) on the admin machine.
 4. Bundle it as PKCS#12 so the browser can import it:
 
@@ -164,6 +167,15 @@ The admin UI's TLS certificate is issued for the CA's host names (`hostnames`), 
 
    If the macOS keychain cannot import it, recreate it with `-legacy`.
 5. Import `admin.p12` into the browser (or the OS certificate store), and **register the root CA (`root.crt`) as trusted**.
+
+> **Note: keep admin names separate from server names**
+> Admin certificates are issued through the same ACME path as server certificates. If a server's EAB key has a wildcard such as
+> `*.internal.example.com`, whoever compromises that server could order a certificate for `admin1.internal.example.com`.
+> mtls-ca therefore issues certificates for names matching `admin.allowed_clients` **only with EAB keys that permit that exact name without a wildcard**
+> (orders with other keys are rejected with `rejectedIdentifier` and audit-logged). Issuing an EAB key from the admin UI also fails if a wildcard
+> overlaps an admin name, and at startup mtls-ca warns about existing keys that overlap.
+> On top of that, put admin names in a subdomain separate from the servers (e.g. `admins.internal.example.com`) and do not create EAB keys
+> with wildcards covering that subdomain (such as `*.admins.internal.example.com`).
 
 ### 9-4. 24-hour certificates and browsers
 
@@ -178,9 +190,10 @@ Admin certificates also expire after 24 hours, so **they must be re-imported int
 
 ### 9-5. Adding and removing admins
 
-- Add: follow 9-3. With a pattern such as `*.admins.internal.example.com` in `admin.allowed_clients`, admins can be added without changing the configuration.
-- Remove: revoke that admin's EAB key (`mtlsctl eab revoke` or the admin UI), revoke the certificate too if needed, remove the name from `admin.allowed_clients` and restart.
-  Even if a certificate remains, it cannot get in once its name is no longer allowed.
+- Add: follow 9-3. With a pattern such as `*.admins.internal.example.com` in `admin.allowed_clients`, admins can be added without changing the configuration
+  (each admin's EAB key must still name the exact name, e.g. `admin1.admins.internal.example.com`).
+- Remove: revoke that admin's certificate (the admin UI's "Issued certificates" page or `mtls-ca revoke`); **the admin is locked out immediately**.
+  Also revoke the EAB key (so no new certificate can be obtained) and, if names are listed individually, remove it from `admin.allowed_clients` (takes effect after a restart).
 
 ### 9-6. Changes from the admin UI
 
@@ -193,6 +206,8 @@ Admins matching `admin.operators` (who must also be in `admin.allowed_clients`) 
 | Issued certificates | Revoke | Choose a reason (unspecified, key compromise, affiliation changed, superseded, cessation of operation) and revoke. It is published in the CRL immediately. **This cannot be undone** |
 
 - Revoking an EAB key or a certificate requires both a confirmation checkbox and a confirmation dialog.
+- The EAB key issuing form carries a one-time token. Reloading the page right after issuing (resubmitting the form) never issues a second key.
+- Result messages are fixed texts chosen by the server (arbitrary text placed in the URL is not displayed).
 - Unlike `mtlsctl eab` / `mtls-ca revoke`, this works **without stopping the CA** (the CLI `mtls-ca revoke` requires the CA to be stopped).
 - Every action is audit-logged (admin name, kid, serial, reason). HMAC keys are never logged.
 - **To prevent forged requests (CSRF)**, each form carries a per-admin token and cross-site submissions (`Origin` / `Sec-Fetch-Site`) are rejected.
@@ -258,7 +273,7 @@ Adjust the location in your backups ([14.](#14-backup-and-restore)) accordingly.
 | An EAB key (HMAC) leaked | Revoke that EAB key and deliver a new one. Check the account count of the key on the admin UI's EAB page for unexpected registrations |
 | Intermediate key leaked | ① Stop the CA ② Create a new intermediate and switch the CA ③ Certificates from the old intermediate expire within 24 hours ④ Assuming no certificates outside the name constraints can exist, investigate impersonation within them |
 | Root key leaked | Rebuild everything. Create a new root and intermediate, and set every server's `ca_root` to the new root only (remove the old root from trust) |
-| An admin certificate leaked | Revoke that admin's EAB key, remove the name from `admin.allowed_clients` and restart. If the admin was read-only, nothing could be changed (and no secrets are displayed). If the admin is in `admin.operators`, check the audit log (`category=audit`: `EAB 鍵を発行` (EAB key issued) / `EAB 鍵を取り消し` (EAB key revoked) / `証明書を失効` (certificate revoked)), revoke any EAB keys issued without authorization, and have servers whose certificates were revoked obtain new ones (`systemctl reload mtls-agent`) |
+| An admin certificate leaked | Revoke that admin's certificate (**locks them out immediately**) and EAB key. If names are listed individually, also remove it from `admin.allowed_clients`. If the admin was read-only, nothing could be changed (and no secrets are displayed). If the admin is in `admin.operators`, check the audit log (`category=audit`: `EAB 鍵を発行` (EAB key issued) / `EAB 鍵を取り消し` (EAB key revoked) / `証明書を失効` (certificate revoked)), revoke any EAB keys issued without authorization, and have servers whose certificates were revoked obtain new ones (`systemctl reload mtls-agent`) |
 
 ## 14. Backup and restore
 

@@ -95,3 +95,16 @@ func TestUpdateIsSerialized(t *testing.T) {
 		t.Fatalf("鍵の数 = %d、want %d（同時の更新で失われた）", len(f.Keys), n)
 	}
 }
+
+func TestAdminNameHelpers(t *testing.T) {
+	k := Key{Names: []string{"*.example.com", "admin1.admins.example.com", "web1.example.com"}}
+	if !k.PermitsExactly("admin1.admins.example.com") || k.PermitsExactly("admin1.example.com") {
+		t.Error("PermitsExactly が完全一致だけを見ていない")
+	}
+	if got := k.WildcardOverlaps([]string{"admin1.example.com"}); len(got) != 1 || got[0] != "*.example.com" {
+		t.Errorf("WildcardOverlaps = %v", got)
+	}
+	if got := k.WildcardOverlaps([]string{"*.admins.example.com", "web1.example.org"}); len(got) != 0 {
+		t.Errorf("重ならないのに検出した: %v", got)
+	}
+}

@@ -2,6 +2,7 @@ package admin
 
 import (
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
@@ -10,8 +11,11 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 	"unicode/utf8"
 
 	"github.com/nobumin/mtls_manager/internal/eab"
@@ -70,27 +74,79 @@ func (s *Server) checkPost(w http.ResponseWriter, r *http.Request, action string
 
 func requireConfirm(r *http.Request) bool { return r.PostForm.Get("confirm") == "yes" }
 
+// onceTokens は EAB 鍵の発行フォームの使い捨てトークン。発行の画面の再読み込み（フォームの再送信）で
+// 鍵がもう 1 つ発行されないよう、使ったトークンを覚えておく。
+type onceTokens struct {
+	mu   sync.Mutex
+	used map[string]time.Time
+}
+
+const onceTTL = 24 * time.Hour
+
+func newOnce() string {
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	return base64.RawURLEncoding.EncodeToString(b)
+}
+
+// use はトークンを使用済みにする。すでに使われていれば false。
+func (o *onceTokens) use(tok string, now time.Time) bool {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.used == nil {
+		o.used = map[string]time.Time{}
+	}
+	for k, t := range o.used {
+		if now.Sub(t) > onceTTL {
+			delete(o.used, k)
+		}
+	}
+	if _, ok := o.used[tok]; ok {
+		return false
+	}
+	o.used[tok] = now
+	return true
+}
+
+var onceRe = regexp.MustCompile(`^[A-Za-z0-9_-]{22}$`)
+
 // handleEABCreate は EAB 鍵を発行し、その HMAC 鍵を一度だけ表示する。
 func (s *Server) handleEABCreate(w http.ResponseWriter, r *http.Request) {
 	admin, ok := s.checkPost(w, r, "eab_create")
 	if !ok {
 		return
 	}
+	once := r.PostForm.Get("once")
+	if !onceRe.MatchString(once) {
+		s.fail(w, r, "eab", http.StatusBadRequest, "フォームが古い。画面を開き直してやり直す")
+		return
+	}
 	patterns := strings.FieldsFunc(r.PostForm.Get("names"), func(c rune) bool { return c == ',' || c == ' ' || c == '\n' || c == '\r' || c == '\t' })
 	note := strings.TrimSpace(r.PostForm.Get("note"))
 	if utf8.RuneCountInString(note) > 200 {
-		redirect(w, r, "/eab", "error", "メモは 200 文字まで")
+		s.fail(w, r, "eab", http.StatusBadRequest, "メモは 200 文字まで")
+		return
+	}
+	if !s.once.use(once, time.Now()) {
+		s.log.Warn("管理画面: EAB 鍵の発行の再送信を無視", "category", "audit", "admin", admin)
+		s.fail(w, r, "eab", http.StatusConflict, "この発行はすでに行った（画面の再読み込みによる再送信は無視した）。発行した鍵は一覧で確かめる")
 		return
 	}
 	var created eab.Key
 	err := eab.Update(s.cfg.EABFile, func(f *eab.File) error {
 		var err error
-		created, err = f.Add(patterns, note)
-		return err
+		if created, err = f.Add(patterns, note); err != nil {
+			return err
+		}
+		// 管理者の名前と重なるワイルドカードは受け付けない（その鍵で管理者の証明書を取られないように）。
+		if ov := created.WildcardOverlaps(s.cfg.Admin.AllowedClients); len(ov) > 0 {
+			return fmt.Errorf("ワイルドカード %s が管理者の名前（admin.allowed_clients）と重なる。管理者の名前はサーバと別のサブドメインにする", strings.Join(ov, ", "))
+		}
+		return nil
 	})
 	if err != nil {
 		s.log.Warn("管理画面: EAB 鍵を発行できない", "category", "audit", "admin", admin, "err", err)
-		redirect(w, r, "/eab", "error", "EAB 鍵を発行できない: "+err.Error())
+		s.fail(w, r, "eab", http.StatusBadRequest, "EAB 鍵を発行できない: "+err.Error())
 		return
 	}
 	s.log.Info("管理画面: EAB 鍵を発行", "category", "audit", "admin", admin, "eab_kid", created.KID, "names", created.Names, "note", created.Note)
@@ -105,25 +161,27 @@ func (s *Server) handleEABRevoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	kid := r.PostForm.Get("kid")
-	if !requireConfirm(r) {
-		redirect(w, r, "/eab", "error", "確認のチェックを入れてから取り消す")
+	if !kidRe.MatchString(kid) {
+		s.fail(w, r, "eab", http.StatusBadRequest, "kid が不正")
 		return
 	}
-	var removed bool
+	if !requireConfirm(r) {
+		s.fail(w, r, "eab", http.StatusBadRequest, "確認のチェックを入れてから取り消す")
+		return
+	}
 	err := eab.Update(s.cfg.EABFile, func(f *eab.File) error {
-		removed = f.Remove(kid)
-		if !removed {
+		if !f.Remove(kid) {
 			return errors.New("見つからない")
 		}
 		return nil
 	})
 	if err != nil {
 		s.log.Warn("管理画面: EAB 鍵を取り消せない", "category", "audit", "admin", admin, "eab_kid", kid, "err", err)
-		redirect(w, r, "/eab", "error", fmt.Sprintf("EAB 鍵 %s を取り消せない: %v", kid, err))
+		s.fail(w, r, "eab", http.StatusBadRequest, fmt.Sprintf("EAB 鍵 %s を取り消せない: %v", kid, err))
 		return
 	}
 	s.log.Warn("管理画面: EAB 鍵を取り消し", "category", "audit", "admin", admin, "eab_kid", kid)
-	redirect(w, r, "/eab", "ok", fmt.Sprintf("EAB 鍵 %s を取り消した。この鍵で登録したサーバは、以後新しい証明書を取得できない（発行済みの証明書は期限まで有効。すぐに止めるには失効させる）", kid))
+	redirectDone(w, r, "/eab", "eab-revoked", kid)
 }
 
 // handleCertRevoke は証明書を失効させる。
@@ -132,58 +190,76 @@ func (s *Server) handleCertRevoke(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	raw := r.PostForm.Get("serial")
 	reason, err := strconv.Atoi(r.PostForm.Get("reason"))
 	if err != nil || !store.ValidRevocationReason(reason) {
-		redirect(w, r, "/certs", "error", "失効理由が不正")
+		s.fail(w, r, "certs", http.StatusBadRequest, "失効理由が不正")
 		return
 	}
-	n, okSerial := new(big.Int).SetString(strings.ReplaceAll(strings.ToLower(raw), ":", ""), 16)
-	if !okSerial {
-		redirect(w, r, "/certs", "error", "シリアルが不正")
+	n, okSerial := new(big.Int).SetString(strings.ReplaceAll(strings.ToLower(r.PostForm.Get("serial")), ":", ""), 16)
+	if !okSerial || n.Sign() <= 0 || n.BitLen() > 160 {
+		s.fail(w, r, "certs", http.StatusBadRequest, "シリアルが不正")
 		return
 	}
 	serial := fmt.Sprintf("%x", n)
 	if !requireConfirm(r) {
-		redirect(w, r, "/certs", "error", "確認のチェックを入れてから失効させる")
+		s.fail(w, r, "certs", http.StatusBadRequest, "確認のチェックを入れてから失効させる")
 		return
 	}
 	switch err := s.revoke(serial, reason); {
 	case errors.Is(err, store.ErrNotFound):
-		redirect(w, r, "/certs", "error", "証明書 "+serial+" が見つからない")
+		s.fail(w, r, "certs", http.StatusNotFound, "証明書 "+serial+" が見つからない")
 		return
 	case errors.Is(err, store.ErrAlreadyRevoked):
-		redirect(w, r, "/certs", "error", "証明書 "+serial+" はすでに失効している")
+		s.fail(w, r, "certs", http.StatusConflict, "証明書 "+serial+" はすでに失効している")
 		return
 	case err != nil:
 		s.log.Error("管理画面: 証明書を失効できない", "category", "audit", "admin", admin, "serial", serial, "err", err)
-		redirect(w, r, "/certs", "error", "証明書を失効できない")
+		s.fail(w, r, "certs", http.StatusInternalServerError, "証明書を失効できない")
 		return
 	}
 	s.log.Warn("管理画面: 証明書を失効", "category", "audit", "admin", admin, "serial", serial, "reason", reason)
-	redirect(w, r, "/certs", "ok", "証明書 "+serial+" を失効させた。CRL に反映される")
+	redirectDone(w, r, "/certs", "cert-revoked", serial)
 }
 
-// redirect は操作の結果を付けて画面に戻す（POST の後の再読み込みで操作が繰り返されないように）。
-func redirect(w http.ResponseWriter, r *http.Request, path, kind, msg string) {
-	q := url.Values{kind: {msg}}
+// fail は操作の失敗を、その画面に重ねて表示する（状態は変わっていないので redirect しない）。
+func (s *Server) fail(w http.ResponseWriter, r *http.Request, page string, status int, msg string) {
+	load := map[string]func(*http.Request) (any, error){"eab": s.eabData, "certs": s.certsData}[page]
+	data, err := load(r)
+	if err != nil {
+		s.log.Error("管理画面: データを読めない", "page", page, "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	s.render(w, r, status, page, data, msg, true)
+}
+
+// 操作の成功は、決まった種類と引数（kid・シリアル）だけを URL に載せて画面に戻す（POST の後の再読み込みで
+// 操作が繰り返されないように）。文言はサーバ側で組み立てるので、URL に任意の文言を仕込んで表示させることはできない。
+var (
+	kidRe    = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
+	serialRe = regexp.MustCompile(`^[0-9a-f]{1,40}$`)
+	doneMsgs = map[string]struct {
+		arg  *regexp.Regexp
+		text string
+	}{
+		"eab-revoked":  {kidRe, "EAB 鍵 %s を取り消した。この鍵で登録したサーバは、以後新しい証明書を取得できない（発行済みの証明書は期限まで有効。すぐに止めるには失効させる）"},
+		"cert-revoked": {serialRe, "証明書 %s を失効させた。CRL に反映される"},
+	}
+)
+
+func redirectDone(w http.ResponseWriter, r *http.Request, path, kind, arg string) {
+	q := url.Values{"done": {kind}, "arg": {arg}}
 	http.Redirect(w, r, path+"?"+q.Encode(), http.StatusSeeOther)
 }
 
-// flashMessage は redirect で付けた結果を取り出す。表示はテンプレートでエスケープされる。
-func flashMessage(r *http.Request) (string, bool) {
+// flashMessage は redirectDone で付けた結果を文言にする。知らない種類や書式に合わない引数は表示しない。
+func flashMessage(r *http.Request) string {
 	q := r.URL.Query()
-	if m := q.Get("error"); m != "" {
-		return truncateRunes(m, 500), true
+	m, ok := doneMsgs[q.Get("done")]
+	if !ok || !m.arg.MatchString(q.Get("arg")) {
+		return ""
 	}
-	return truncateRunes(q.Get("ok"), 500), false
-}
-
-func truncateRunes(s string, n int) string {
-	if utf8.RuneCountInString(s) <= n {
-		return s
-	}
-	return string([]rune(s)[:n])
+	return fmt.Sprintf(m.text, q.Get("arg"))
 }
 
 // checkWritable は dir にファイルを作れるかを確かめる（EAB 鍵ファイルの書き換えとロックファイルに必要）。

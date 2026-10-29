@@ -72,3 +72,24 @@ func TestValidateDomain(t *testing.T) {
 		}
 	}
 }
+
+func TestOverlap(t *testing.T) {
+	cases := []struct {
+		a, b string
+		want bool
+	}{
+		{"admin1.example.com", "admin1.example.com", true},
+		{"admin1.example.com", "admin2.example.com", false},
+		{"*.example.com", "admin1.example.com", true},
+		{"admin1.example.com", "*.example.com", true},
+		{"*.example.com", "a.admins.example.com", false}, // 1 ラベルだけ
+		{"*.example.com", "*.admins.example.com", false},
+		{"*.admins.example.com", "*.admins.example.com", true},
+		{"*.example.com", "example.com", false},
+	}
+	for _, c := range cases {
+		if got := Overlap(c.a, c.b); got != c.want {
+			t.Errorf("Overlap(%q, %q) = %v", c.a, c.b, got)
+		}
+	}
+}

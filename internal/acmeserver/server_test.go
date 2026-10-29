@@ -236,6 +236,38 @@ func TestOrderRejectsNamesOutsidePolicy(t *testing.T) {
 	}
 }
 
+// 管理者の名前（admin.allowed_clients）は、その名前を完全一致で許可した EAB 鍵でだけ発行する。
+// サーバ用のワイルドカードの鍵で管理者の証明書を取られないように。
+func TestAdminNamesRequireExactEAB(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	adminName := "admin1." + testca.Domain
+	ca := testca.Start(t, func(c *config.CA) {
+		c.Admin.AllowedClients = []string{adminName, "*.admins." + testca.Domain}
+	})
+
+	// サーバ用のワイルドカードの鍵では、管理者の名前を注文できない（通常のサーバの名前は注文できる）。
+	kid, hmac, _ := ca.AddEAB(t, "*."+testca.Domain, "*.admins."+testca.Domain)
+	c := newClient(t, ca)
+	register(t, ctx, c, kid, hmac)
+	for _, n := range []string{adminName, "evil.admins." + testca.Domain} {
+		if _, err := c.AuthorizeOrder(ctx, acme.DomainIDs(n)); problemType(err) != "urn:ietf:params:acme:error:rejectedIdentifier" {
+			t.Errorf("%s: ワイルドカードの鍵で管理者の名前を注文できた: %v", n, err)
+		}
+	}
+	if _, err := c.AuthorizeOrder(ctx, acme.DomainIDs(web1)); err != nil {
+		t.Errorf("通常の名前を注文できない: %v", err)
+	}
+
+	// その名前を完全一致で許可した鍵なら発行できる。
+	kid2, hmac2, _ := ca.AddEAB(t, adminName)
+	c2 := newClient(t, ca)
+	register(t, ctx, c2, kid2, hmac2)
+	if certs := issue(t, ctx, ca, c2, config.ChallengeHTTP01, adminName); certs[0].DNSNames[0] != adminName {
+		t.Fatalf("管理者の証明書の名前 = %v", certs[0].DNSNames)
+	}
+}
+
 func TestRemovedEABBlocksNewOrders(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

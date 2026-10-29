@@ -118,3 +118,16 @@ func WithinAnyDomain(domains []string, name string) bool {
 	}
 	return false
 }
+
+// Overlap は 2 つのパターンの両方に一致する名前があり得るかを返す。どちらも Normalize 済みであること。
+func Overlap(a, b string) bool {
+	aw, bw := strings.HasPrefix(a, "*."), strings.HasPrefix(b, "*.")
+	switch {
+	case aw && bw, !aw && !bw:
+		return a == b
+	case aw:
+		return MatchPattern(a, b)
+	default:
+		return MatchPattern(b, a)
+	}
+}

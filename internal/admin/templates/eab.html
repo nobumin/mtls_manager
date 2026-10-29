@@ -4,6 +4,7 @@
 <h2>EAB 鍵を発行する</h2>
 <form class="action" method="post" action="/eab/create">
   <input type="hidden" name="csrf" value="{{$.CSRF}}">
+  <input type="hidden" name="once" value="{{$.Once}}">
   <label>発行してよい名前（カンマか改行で区切る。例: web2.internal.example.com、*.app.internal.example.com）
     <textarea name="names" rows="2" required></textarea></label>
   <label>メモ（200 文字まで。例: サーバの名前・用途）

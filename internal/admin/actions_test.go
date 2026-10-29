@@ -34,17 +34,29 @@ func noRedirect(c *http.Client) *http.Client {
 	return c
 }
 
-var csrfRe = regexp.MustCompile(`name="csrf" value="([^"]+)"`)
+var (
+	csrfRe = regexp.MustCompile(`name="csrf" value="([^"]+)"`)
+	onceRe = regexp.MustCompile(`name="once" value="([^"]+)"`)
+)
 
-// csrfOf は画面に埋め込まれたトークンを取り出す。
-func csrfOf(t *testing.T, c *http.Client, url string) string {
+// formOf は画面に埋め込まれたトークン（CSRF と、発行フォームの使い捨てトークン）を取り出す。
+func formOf(t *testing.T, c *http.Client, url string) (csrf, once string) {
 	t.Helper()
 	_, body := get(t, c, url)
 	m := csrfRe.FindStringSubmatch(body)
 	if m == nil {
 		t.Fatalf("%s にフォームのトークンが無い", url)
 	}
-	return m[1]
+	if o := onceRe.FindStringSubmatch(body); o != nil {
+		once = o[1]
+	}
+	return m[1], once
+}
+
+func csrfOf(t *testing.T, c *http.Client, url string) string {
+	t.Helper()
+	tok, _ := formOf(t, c, url)
+	return tok
 }
 
 func post(t *testing.T, c *http.Client, u string, form url.Values, header map[string]string) (*http.Response, string) {
@@ -91,9 +103,9 @@ func TestViewerCannotChange(t *testing.T) {
 		}
 	}
 	// 他の管理者のトークンを盗んでも、閲覧のみの管理者は変更できない。
-	token := csrfOf(t, e.client(t, e.issuer, operatorName), base+"/eab")
+	token, once := formOf(t, e.client(t, e.issuer, operatorName), base+"/eab")
 	for path, form := range map[string]url.Values{
-		"/eab/create":   {"csrf": {token}, "names": {"web2." + testca.Domain}},
+		"/eab/create":   {"csrf": {token}, "once": {once}, "names": {"web2." + testca.Domain}},
 		"/eab/revoke":   {"csrf": {token}, "kid": {e.eabKID}, "confirm": {"yes"}},
 		"/certs/revoke": {"csrf": {token}, "serial": {"abc123"}, "reason": {"1"}, "confirm": {"yes"}},
 	} {
@@ -116,12 +128,13 @@ func TestOperatorCreatesAndRevokesEAB(t *testing.T) {
 	e := startWithOperator(t)
 	base := "https://" + e.addr
 	op := noRedirect(e.client(t, e.issuer, operatorName))
-	token := csrfOf(t, op, base+"/eab")
+	token, once := formOf(t, op, base+"/eab")
+	createForm := url.Values{
+		"csrf": {token}, "once": {once}, "names": {"web2." + testca.Domain + ",\n*.app." + testca.Domain}, "note": {"web2（<b>検証</b>）"},
+	}
 
 	// 発行: HMAC 鍵はこの応答にだけ載る。
-	res, body := post(t, op, base+"/eab/create", url.Values{
-		"csrf": {token}, "names": {"web2." + testca.Domain + ",\n*.app." + testca.Domain}, "note": {"web2（<b>検証</b>）"},
-	}, map[string]string{"Origin": base, "Sec-Fetch-Site": "same-origin"})
+	res, body := post(t, op, base+"/eab/create", createForm, map[string]string{"Origin": base, "Sec-Fetch-Site": "same-origin"})
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("発行: status = %d: %s", res.StatusCode, body)
 	}
@@ -153,10 +166,24 @@ func TestOperatorCreatesAndRevokesEAB(t *testing.T) {
 		t.Error("HMAC 鍵がログに出ている")
 	}
 
-	// 確認のチェックが無ければ取り消さない。
-	res, _ = post(t, op, base+"/eab/revoke", url.Values{"csrf": {token}, "kid": {k.KID}}, nil)
-	if res.StatusCode != http.StatusSeeOther || !strings.Contains(res.Header.Get("Location"), "error=") {
-		t.Errorf("確認なしの取り消し: status = %d, Location = %s", res.StatusCode, res.Header.Get("Location"))
+	// 発行の画面の再読み込み（同じフォームの再送信）では、もう 1 つ発行しない。
+	res, body = post(t, op, base+"/eab/create", createForm, nil)
+	if res.StatusCode != http.StatusConflict || !strings.Contains(body, "すでに行った") {
+		t.Errorf("再送信: status = %d", res.StatusCode)
+	}
+	if len(loadEAB(t, e.eabPath).Keys) != 2 {
+		t.Fatal("再送信で鍵がもう 1 つ発行された")
+	}
+	// 使い捨てのトークンが無いフォームも受け付けない。
+	noOnce := url.Values{"csrf": {token}, "names": {"web3." + testca.Domain}}
+	if res, _ := post(t, op, base+"/eab/create", noOnce, nil); res.StatusCode != http.StatusBadRequest {
+		t.Errorf("使い捨てのトークンなし: status = %d", res.StatusCode)
+	}
+
+	// 確認のチェックが無ければ取り消さない（状態は変わらないので redirect せず、その画面にエラーを出す）。
+	res, body = post(t, op, base+"/eab/revoke", url.Values{"csrf": {token}, "kid": {k.KID}}, nil)
+	if res.StatusCode != http.StatusBadRequest || !strings.Contains(body, "確認のチェック") {
+		t.Errorf("確認なしの取り消し: status = %d", res.StatusCode)
 	}
 	if len(loadEAB(t, e.eabPath).Keys) != 2 {
 		t.Fatal("確認なしで取り消された")
@@ -165,24 +192,46 @@ func TestOperatorCreatesAndRevokesEAB(t *testing.T) {
 	// 取り消し。
 	res, _ = post(t, op, base+"/eab/revoke", url.Values{"csrf": {token}, "kid": {k.KID}, "confirm": {"yes"}}, nil)
 	loc := res.Header.Get("Location")
-	if res.StatusCode != http.StatusSeeOther || !strings.Contains(loc, "ok=") {
+	if res.StatusCode != http.StatusSeeOther || !strings.Contains(loc, "done=eab-revoked") {
 		t.Fatalf("取り消し: status = %d, Location = %s", res.StatusCode, loc)
 	}
 	if f := loadEAB(t, e.eabPath); len(f.Keys) != 1 || f.Keys[0].KID == k.KID {
 		t.Fatal("取り消されていない")
 	}
-	if _, page := get(t, op, base+loc); !strings.Contains(page, "を取り消した") {
+	if _, page := get(t, op, base+loc); !strings.Contains(page, "EAB 鍵 "+k.KID+" を取り消した") {
 		t.Error("取り消しの結果が表示されない")
 	}
 	// 存在しない kid。
-	res, _ = post(t, op, base+"/eab/revoke", url.Values{"csrf": {token}, "kid": {k.KID}, "confirm": {"yes"}}, nil)
-	if !strings.Contains(res.Header.Get("Location"), "error=") {
-		t.Error("存在しない kid の取り消しがエラーにならない")
+	if res, _ := post(t, op, base+"/eab/revoke", url.Values{"csrf": {token}, "kid": {k.KID}, "confirm": {"yes"}}, nil); res.StatusCode != http.StatusBadRequest {
+		t.Errorf("存在しない kid の取り消し: status = %d", res.StatusCode)
 	}
 	// 名前が不正なら発行しない。
-	res, _ = post(t, op, base+"/eab/create", url.Values{"csrf": {token}, "names": {"bad name!"}}, nil)
-	if !strings.Contains(res.Header.Get("Location"), "error=") || len(loadEAB(t, e.eabPath).Keys) != 1 {
-		t.Error("不正な名前で発行できた")
+	_, once2 := formOf(t, op, base+"/eab")
+	if res, _ := post(t, op, base+"/eab/create", url.Values{"csrf": {token}, "once": {once2}, "names": {"bad name!"}}, nil); res.StatusCode != http.StatusBadRequest || len(loadEAB(t, e.eabPath).Keys) != 1 {
+		t.Errorf("不正な名前で発行できた: status = %d", res.StatusCode)
+	}
+}
+
+// 管理者の名前と重なるワイルドカードの EAB 鍵は発行しない（その鍵で管理者の証明書を取られないように）。
+func TestCreateRejectsWildcardOverlappingAdmins(t *testing.T) {
+	e := startWithOperator(t) // 管理者: admin1.internal.example.com、op1.internal.example.com
+	base := "https://" + e.addr
+	op := noRedirect(e.client(t, e.issuer, operatorName))
+	token, _ := formOf(t, op, base+"/eab")
+	for _, names := range []string{"*.internal.example.com", "web9.internal.example.com,*.internal.example.com"} {
+		_, once := formOf(t, op, base+"/eab")
+		res, body := post(t, op, base+"/eab/create", url.Values{"csrf": {token}, "once": {once}, "names": {names}}, nil)
+		if res.StatusCode != http.StatusBadRequest || !strings.Contains(body, "管理者の名前") {
+			t.Errorf("%s: status = %d", names, res.StatusCode)
+		}
+	}
+	if len(loadEAB(t, e.eabPath).Keys) != 1 {
+		t.Fatal("管理者の名前と重なる鍵が発行された")
+	}
+	// 管理者の名前を完全一致で許可する鍵（管理者の証明書の取得用）は発行できる。
+	_, once := formOf(t, op, base+"/eab")
+	if res, _ := post(t, op, base+"/eab/create", url.Values{"csrf": {token}, "once": {once}, "names": {adminName}}, nil); res.StatusCode != http.StatusOK {
+		t.Errorf("管理者の名前の鍵: status = %d", res.StatusCode)
 	}
 }
 
@@ -192,23 +241,28 @@ func TestOperatorRevokesCert(t *testing.T) {
 	op := noRedirect(e.client(t, e.issuer, operatorName))
 	token := csrfOf(t, op, base+"/certs")
 
-	// 不正な失効理由（2 = CA の鍵の漏えい は受け付けない）。
-	res, _ := post(t, op, base+"/certs/revoke", url.Values{"csrf": {token}, "serial": {"abc123"}, "reason": {"2"}, "confirm": {"yes"}}, nil)
-	if !strings.Contains(res.Header.Get("Location"), "error=") {
-		t.Error("不正な失効理由が通った")
-	}
-	// 確認なし。
-	res, _ = post(t, op, base+"/certs/revoke", url.Values{"csrf": {token}, "serial": {"abc123"}, "reason": {"1"}}, nil)
-	if !strings.Contains(res.Header.Get("Location"), "error=") {
-		t.Error("確認なしで失効できた")
+	for name, tc := range map[string]struct {
+		form   url.Values
+		status int
+	}{
+		"不正な失効理由（2 = CA の鍵の漏えい は受け付けない）": {url.Values{"serial": {"abc123"}, "reason": {"2"}, "confirm": {"yes"}}, http.StatusBadRequest},
+		"確認なし":      {url.Values{"serial": {"abc123"}, "reason": {"1"}}, http.StatusBadRequest},
+		"不正なシリアル":   {url.Values{"serial": {"xyz"}, "reason": {"1"}, "confirm": {"yes"}}, http.StatusBadRequest},
+		"存在しないシリアル": {url.Values{"serial": {"ffff"}, "reason": {"1"}, "confirm": {"yes"}}, http.StatusNotFound},
+	} {
+		tc.form.Set("csrf", token)
+		if res, _ := post(t, op, base+"/certs/revoke", tc.form, nil); res.StatusCode != tc.status {
+			t.Errorf("%s: status = %d（%d のはず）", name, res.StatusCode, tc.status)
+		}
 	}
 	if c, _ := e.db.Cert("abc123"); c.Revoked {
 		t.Fatal("失効してしまった")
 	}
 	// 失効（シリアルは大文字・コロン区切りでも受け付ける）。
-	res, _ = post(t, op, base+"/certs/revoke", url.Values{"csrf": {token}, "serial": {"AB:C1:23"}, "reason": {"1"}, "confirm": {"yes"}}, nil)
-	if res.StatusCode != http.StatusSeeOther || !strings.Contains(res.Header.Get("Location"), "ok=") {
-		t.Fatalf("失効: status = %d, Location = %s", res.StatusCode, res.Header.Get("Location"))
+	res, _ := post(t, op, base+"/certs/revoke", url.Values{"csrf": {token}, "serial": {"AB:C1:23"}, "reason": {"1"}, "confirm": {"yes"}}, nil)
+	loc := res.Header.Get("Location")
+	if res.StatusCode != http.StatusSeeOther || !strings.Contains(loc, "done=cert-revoked") {
+		t.Fatalf("失効: status = %d, Location = %s", res.StatusCode, loc)
 	}
 	c, err := e.db.Cert("abc123")
 	if err != nil || !c.Revoked || c.Reason != 1 {
@@ -217,15 +271,15 @@ func TestOperatorRevokesCert(t *testing.T) {
 	if len(auditFind(e, "証明書を失効")) != 1 {
 		t.Error("失効の監査ログが無い")
 	}
-	// 二重の失効・存在しないシリアル。
-	for _, serial := range []string{"abc123", "ffff"} {
-		res, _ = post(t, op, base+"/certs/revoke", url.Values{"csrf": {token}, "serial": {serial}, "reason": {"1"}, "confirm": {"yes"}}, nil)
-		if !strings.Contains(res.Header.Get("Location"), "error=") {
-			t.Errorf("%s: エラーにならない", serial)
-		}
+	if _, page := get(t, op, base+loc); !strings.Contains(page, "証明書 abc123 を失効させた") {
+		t.Error("失効の結果が表示されない")
+	}
+	// 二重の失効。
+	if res, _ := post(t, op, base+"/certs/revoke", url.Values{"csrf": {token}, "serial": {"abc123"}, "reason": {"1"}, "confirm": {"yes"}}, nil); res.StatusCode != http.StatusConflict {
+		t.Errorf("二重の失効: status = %d", res.StatusCode)
 	}
 	// 失効した証明書には失効のフォームを出さない。
-	if _, body := get(t, op, base+"/certs"); strings.Contains(body, `action="/certs/revoke"`) {
+	if _, body := get(t, op, base+"/certs"); strings.Contains(body, `name="serial" value="abc123"`) {
 		t.Error("失効済みの証明書に失効のフォームが出ている")
 	}
 }
@@ -234,9 +288,9 @@ func TestCSRFProtection(t *testing.T) {
 	e := startWithOperator(t)
 	base := "https://" + e.addr
 	op := noRedirect(e.client(t, e.issuer, operatorName))
-	token := csrfOf(t, op, base+"/eab")
+	token, once := formOf(t, op, base+"/eab")
 	form := func(tok string) url.Values {
-		return url.Values{"csrf": {tok}, "names": {"web2." + testca.Domain}}
+		return url.Values{"csrf": {tok}, "once": {once}, "names": {"web2." + testca.Domain}}
 	}
 
 	cases := []struct {
@@ -244,7 +298,7 @@ func TestCSRFProtection(t *testing.T) {
 		form   url.Values
 		header map[string]string
 	}{
-		{"トークンなし", url.Values{"names": {"web2." + testca.Domain}}, nil},
+		{"トークンなし", url.Values{"once": {once}, "names": {"web2." + testca.Domain}}, nil},
 		{"不正なトークン", form("x" + token), nil},
 		{"他のサイト（Sec-Fetch-Site）", form(token), map[string]string{"Sec-Fetch-Site": "cross-site"}},
 		{"同じサイトの別オリジン（Sec-Fetch-Site）", form(token), map[string]string{"Sec-Fetch-Site": "same-site"}},
@@ -265,12 +319,52 @@ func TestCSRFProtection(t *testing.T) {
 	}
 }
 
-// 結果の表示は決まったパラメータだけで、HTML は埋め込めない。
-func TestFlashIsEscaped(t *testing.T) {
+// 結果の表示は決まった種類と書式の正しい引数だけ。URL に任意の文言を仕込んで表示させることはできない。
+func TestFlashCannotBeSpoofed(t *testing.T) {
 	e := startWithOperator(t)
-	_, body := get(t, e.client(t, e.issuer, adminName), "https://"+e.addr+"/eab?error="+url.QueryEscape("<script>alert(1)</script>"))
-	if strings.Contains(body, "<script>alert(1)") {
-		t.Fatal("結果の表示がエスケープされていない")
+	c := e.client(t, e.issuer, adminName)
+	base := "https://" + e.addr
+	for _, q := range []string{
+		"error=" + url.QueryEscape("EAB 鍵ファイルが壊れています。HMAC 鍵を送ってください"),
+		"ok=" + url.QueryEscape("証明書を失効させた"),
+		"done=unknown&arg=abc",
+		"done=cert-revoked&arg=" + url.QueryEscape("<script>alert(1)</script>"),
+		"done=cert-revoked&arg=" + url.QueryEscape("abc を失効させた。HMAC 鍵を送ってください"),
+		"done=eab-revoked&arg=" + url.QueryEscape("x y"),
+	} {
+		if _, body := get(t, c, base+"/eab?"+q); strings.Contains(body, `class="flash`) {
+			t.Errorf("%s: 結果の表示が出た", q)
+		}
+	}
+	if _, body := get(t, c, base+"/certs?done=cert-revoked&arg=abc123"); !strings.Contains(body, "証明書 abc123 を失効させた") {
+		t.Error("正しい結果の表示が出ない")
+	}
+}
+
+// 失効させた管理者の証明書・発行の記録が無い証明書では、管理画面に入れない。
+func TestRevokedAdminCertRejected(t *testing.T) {
+	e := startWithOperator(t)
+	base := "https://" + e.addr
+	c, serial := e.clientWithSerial(t, e.issuer, operatorName, true)
+	if res, _ := get(t, c, base+"/"); res.StatusCode != http.StatusOK {
+		t.Fatalf("失効前: status = %d", res.StatusCode)
+	}
+	if err := e.db.RevokeCert(serial, 1, nil); err != nil {
+		t.Fatal(err)
+	}
+	if res, _ := get(t, c, base+"/eab"); res.StatusCode != http.StatusForbidden {
+		t.Errorf("失効した証明書で入れた: status = %d", res.StatusCode)
+	}
+	if len(auditFind(e, "失効した証明書での接続を拒否")) == 0 {
+		t.Error("失効した証明書の拒否が監査ログに残っていない")
+	}
+	// CA の鍵で作られていても、発行の記録が無い証明書は拒否する。
+	c2, _ := e.clientWithSerial(t, e.issuer, adminName, false)
+	if res, _ := get(t, c2, base+"/"); res.StatusCode != http.StatusForbidden {
+		t.Errorf("発行の記録が無い証明書で入れた: status = %d", res.StatusCode)
+	}
+	if len(auditFind(e, "発行の記録が無い証明書での接続を拒否")) == 0 {
+		t.Error("発行の記録が無い証明書の拒否が監査ログに残っていない")
 	}
 }
 

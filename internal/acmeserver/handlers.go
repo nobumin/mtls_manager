@@ -182,6 +182,12 @@ func (s *Server) checkNames(k eab.Key, list []string) *problem {
 		if !k.Permits(n) {
 			return newProblem(http.StatusBadRequest, "rejectedIdentifier", "%q はこのアカウント（EAB 鍵）には許可されていない", n)
 		}
+		// 管理画面に入れる名前は、その名前をワイルドカードを使わずに許可した EAB 鍵でだけ発行する。
+		// サーバ用のワイルドカードの鍵（例: *.internal.example.com）で管理者の証明書を取られないようにするため。
+		if names.MatchAny(s.cfg.Admin.AllowedClients, n) && !k.PermitsExactly(n) {
+			s.log.Warn("管理者の名前の注文を拒否（EAB 鍵が完全一致で許可していない）", "category", "audit", "name", n, "eab_kid", k.KID)
+			return newProblem(http.StatusBadRequest, "rejectedIdentifier", "%q は管理者の名前（admin.allowed_clients）なので、その名前をワイルドカードを使わずに許可した EAB 鍵でだけ発行できる", n)
+		}
 	}
 	return nil
 }

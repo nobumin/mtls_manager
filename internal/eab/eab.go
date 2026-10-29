@@ -14,6 +14,7 @@ import (
 	"io/fs"
 	"os"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -223,4 +224,25 @@ func (s *Store) Keys() ([]Key, error) {
 	}
 	slices.SortFunc(out, func(a, b Key) int { return a.CreatedAt.Compare(b.CreatedAt) })
 	return out, nil
+}
+
+// PermitsExactly は name をワイルドカードを使わずに（完全一致で）許可しているかを返す。
+// 管理者の名前の証明書は、この条件を満たす鍵でだけ発行する（サーバ用のワイルドカードの鍵で取られないように）。
+func (k Key) PermitsExactly(name string) bool { return slices.Contains(k.Names, name) }
+
+// WildcardOverlaps は、この鍵のワイルドカードのパターンのうち、protected のいずれかと重なるものを返す。
+func (k Key) WildcardOverlaps(protected []string) []string {
+	var out []string
+	for _, p := range k.Names {
+		if !strings.HasPrefix(p, "*.") {
+			continue
+		}
+		for _, q := range protected {
+			if names.Overlap(p, q) {
+				out = append(out, p)
+				break
+			}
+		}
+	}
+	return out
 }

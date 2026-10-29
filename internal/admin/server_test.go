@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -104,8 +105,17 @@ func start(t *testing.T, mutate func(*config.CA)) *env {
 }
 
 // client は name の証明書を持つ管理者のブラウザを模す（name が空なら証明書なし）。
+// この CA（e.issuer）の証明書なら、CA が発行したときと同じく発行の記録も残す。
 func (e *env) client(t *testing.T, iss *pki.Issuer, name string) *http.Client {
 	t.Helper()
+	c, _ := e.clientWithSerial(t, iss, name, true)
+	return c
+}
+
+// clientWithSerial は client と同じで、証明書のシリアル（発行の記録のキー）も返す。record が false なら発行の記録を残さない。
+func (e *env) clientWithSerial(t *testing.T, iss *pki.Issuer, name string, record bool) (*http.Client, string) {
+	t.Helper()
+	var serial string
 	roots := x509.NewCertPool()
 	roots.AddCert(e.issuer.Root)
 	tc := &tls.Config{RootCAs: roots, ServerName: caName}
@@ -116,8 +126,17 @@ func (e *env) client(t *testing.T, iss *pki.Issuer, name string) *http.Client {
 			t.Fatal(err)
 		}
 		tc.Certificates = []tls.Certificate{{Certificate: [][]byte{leaf.Raw, iss.Cert.Raw}, PrivateKey: key}}
+		serial = fmt.Sprintf("%x", leaf.SerialNumber)
+		if iss == e.issuer && record {
+			if err := e.db.CreateOrder(&store.Order{ID: "o-" + serial, Status: store.StatusProcessing}, nil); err != nil {
+				t.Fatal(err)
+			}
+			if err := e.db.FinalizeOrder("o-"+serial, &store.Cert{Serial: serial, Names: []string{name}, NotBefore: leaf.NotBefore, NotAfter: leaf.NotAfter}); err != nil {
+				t.Fatal(err)
+			}
+		}
 	}
-	return &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{TLSClientConfig: tc}}
+	return &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{TLSClientConfig: tc}}, serial
 }
 
 func get(t *testing.T, c *http.Client, url string) (*http.Response, string) {

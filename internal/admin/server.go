@@ -69,6 +69,7 @@ type Server struct {
 	operators []string
 	revoke    func(serial string, reason int) error
 	csrfKey   []byte
+	once      onceTokens
 }
 
 // New は Server を作る。
@@ -174,6 +175,14 @@ func (s *Server) requireAdmin(next http.Handler) http.Handler {
 			http.Error(w, "client certificate required", http.StatusUnauthorized)
 			return
 		}
+		// 失効させた管理者の証明書では入れない。管理画面は CA と同じプロセスで発行の記録を持っているので、
+		// CRL を使わずにその場で確かめられる。この CA の発行の記録に無い証明書も拒否する。
+		if reason := s.certRejected(r.TLS.PeerCertificates[0]); reason != "" {
+			s.log.Warn("管理画面: "+reason+"での接続を拒否", "category", "audit", "admin", peers[0],
+				"serial", fmt.Sprintf("%x", r.TLS.PeerCertificates[0].SerialNumber), "remote", r.RemoteAddr)
+			http.Error(w, "forbidden: "+reason, http.StatusForbidden)
+			return
+		}
 		// API のポーリングは頻繁なので debug にとどめる（画面の表示は info で残す）。
 		level := slog.LevelInfo
 		if r.URL.Path == "/api/logs" {
@@ -207,6 +216,7 @@ type pageData struct {
 	Now      time.Time
 	Operator bool   // 変更の操作ができる管理者か
 	CSRF     string // 変更の操作のフォームに埋め込むトークン
+	Once     string // EAB 鍵の発行フォームの使い捨てトークン
 	Flash    string // 直前の操作の結果
 	FlashBad bool
 	Data     any
@@ -220,8 +230,7 @@ func (s *Server) page(name string, load func(*http.Request) (any, error)) http.H
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
-		flash, bad := flashMessage(r)
-		s.render(w, r, http.StatusOK, name, data, flash, bad)
+		s.render(w, r, http.StatusOK, name, data, flashMessage(r), false)
 	}
 }
 
@@ -231,11 +240,28 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, status int, name
 	admin := mtls.PeerNames(r.TLS)[0]
 	pd := pageData{
 		Title: titles[name], Page: name, Admin: admin, Version: version.Version, Now: time.Now(),
-		Operator: s.isOperator(admin), CSRF: s.csrfToken(admin), Flash: flash, FlashBad: flashBad, Data: data,
+		Operator: s.isOperator(admin), CSRF: s.csrfToken(admin), Once: newOnce(), Flash: flash, FlashBad: flashBad, Data: data,
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)
 	if err := s.tmpl[name].Execute(w, pd); err != nil {
 		s.log.Error("管理画面: 画面を作れない", "page", name, "err", err)
 	}
+}
+
+// certRejected は管理者の証明書を発行の記録と照らし、拒否する理由を返す（問題がなければ空）。
+func (s *Server) certRejected(c *x509.Certificate) string {
+	rec, err := s.db.Cert(fmt.Sprintf("%x", c.SerialNumber))
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+		return "発行の記録が無い証明書"
+	case err != nil:
+		s.log.Error("管理画面: 発行の記録を読めない", "err", err)
+		return "発行の記録を確かめられない証明書"
+	case rec.Revoked:
+		return "失効した証明書"
+	case rec.Pending:
+		return "発行を完了していない証明書"
+	}
+	return ""
 }
