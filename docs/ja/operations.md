@@ -46,6 +46,7 @@ sudo systemctl start mtls-ca
 > **注意**: v0.x の `mtls` ライブラリと `mtls-agent` は CRL を確かめません。失効の効果があるのは、CRL を読むように設定したソフトだけです。
 > ただし、**nginx の `ssl_crl` は、この CA の CRL だけでは使えません**。nginx はチェーンのすべての段（中間 CA を発行したルート CA の段も含む）の
 > CRL を求めますが、ルート CA の CRL は無いため、失効していない証明書も含めてすべての接続を拒否します（error.log に `unable to get certificate CRL`）。
+> 回避するには、ルート CA の空の CRL（中間 CA を失効させていないもの）を、オフラインの端末でルート CA の鍵を使って作り、CA の CRL と 1 つのファイルに並べて指定します。ルート CA の CRL にも有効期限があるので、定期的に作り直す必要があります。今の `mtlsctl` にはこの機能が無く、ルート CA の CRL を作る機能（`mtlsctl root crl` など）は今後の課題です。
 > 失効したかどうかは `openssl verify -crl_check` で確かめられます（[動作テスト手順書 5.](test-procedure.md#5-失効と-eab-鍵の取り消し)）。
 > mtls_manager は、**有効期間を短くする**（既定 24 時間）ことで、
 > 失効に頼らずに済む設計にしています。急ぎの場合は、相手側のアプリの許可リスト（`AllowedPeers`）から外すことも検討してください。

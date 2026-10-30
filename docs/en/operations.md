@@ -46,7 +46,8 @@ Entries that `certs` shows as `未完了` (incomplete) are serials recorded befo
 > **Note**: in v0.x neither the `mtls` library nor `mtls-agent` checks the CRL. Revocation only affects software configured to read the CRL.
 > However, **nginx's `ssl_crl` cannot be used with this CA's CRL alone**: nginx requires CRLs for every level of the chain (including the root CA level
 > that issued the intermediate), and there is no root CA CRL, so every connection is refused, including certificates that are not revoked
-> (error.log: `unable to get certificate CRL`). Check whether a certificate is revoked with `openssl verify -crl_check` ([test procedure 5.](test-procedure.md#5-revocation-and-eab-key-revocation)).
+> (error.log: `unable to get certificate CRL`). To work around it, create an empty root CA CRL (one that revokes no intermediate) with the root CA key on the offline machine, and put it in one file together with the CA's CRL. The root CA CRL also expires, so it must be recreated regularly. `mtlsctl` cannot do this yet; a command to create the root CA CRL (such as `mtlsctl root crl`) is future work.
+> Check whether a certificate is revoked with `openssl verify -crl_check` ([test procedure 5.](test-procedure.md#5-revocation-and-eab-key-revocation)).
 > mtls_manager is designed around **short lifetimes** (24 hours by default) instead of revocation.
 > In urgent cases, also consider removing the peer from the applications' allowlists (`AllowedPeers`).
 

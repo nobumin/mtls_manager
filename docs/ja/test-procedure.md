@@ -390,7 +390,8 @@ sudo nginx -t && sudo systemctl restart nginx
 | AP-12 | `curl --noproxy '*' -sS -o /dev/null -w '%{http_code}\n' --cacert $A/ca.pem --cert fake/app1.crt --key fake/app1.key https://web1.internal.example.com:9443/`（別のルート CA） | `400`（The SSL certificate error） | |
 
 nginx は証明書を読み直すのに reload が必要です（本番では `deploy/systemd/mtls-reload-nginx.path` を使います。[導入手順 6.](getting-started.md#nginx)）。
-このテストでは更新のたびに reload しないので、テストを 15 分以上続ける場合は、AP-09 の前に `sudo systemctl reload nginx` を実行してください。
+このテストでは更新のたびに reload しないので、**nginx の項目（AP-09〜AP-12、RV-03、RV-07）の前には、毎回 `sudo systemctl reload nginx` を実行してください**。
+読み込んだときの web1 の証明書は 15 分で切れるので、reload しないと、curl がサーバ証明書の期限切れ（`certificate has expired`、`%{http_code}` は `000`）で失敗し、確かめたい結果にたどり着けません。
 
 ## 5. 失効と EAB 鍵の取り消し
 
@@ -400,11 +401,11 @@ app2 を「廃棄したサーバ」と見立てて、EAB 鍵の取り消しと�
 | --- | --- | --- | --- |
 | RV-01 | app2 の kid を `sudo mtlsctl eab list -file /etc/mtls-ca/eab.json` で確かめ、`sudo mtlsctl eab revoke -file /etc/mtls-ca/eab.json -kid <app2 の kid>` | 「EAB 鍵 … を取り消した。この鍵で登録したサーバは、以後新しい証明書を取得できない」。`eab list` から app2 が消える | |
 | RV-02 | `sudo mtls-agent renew -config /etc/mtls-agent-app2/config.yaml -force; echo $?` | `403 urn:ietf:params:acme:error:unauthorized: このアカウントの EAB 鍵は取り消されている`、終了コード 1（CA の再起動なしで反映される） | |
-| RV-03 | AP-10 をもう一度実行 | まだ `403`（TLS の検証は通る）。取り消しの後も、発行済みの証明書は有効期限まで使える | |
+| RV-03 | `sudo systemctl reload nginx` の後、AP-10 をもう一度実行 | まだ `403`（TLS の検証は通る）。取り消しの後も、発行済みの証明書は有効期限まで使える | |
 | RV-04 | CA を止めて、app2 の証明書を失効させる:<br>`sudo systemctl stop mtls-ca`<br>`sudo -u mtls-ca mtls-ca certs -config /etc/mtls-ca/config.yaml`<br>`sudo -u mtls-ca mtls-ca revoke -config /etc/mtls-ca/config.yaml -serial <app2 のシリアル> -reason 1`<br>`sudo systemctl start mtls-ca` | `certs` に発行済みの証明書が並ぶ（app2 の行の SERIAL を使う）。「証明書 … を失効させた。mtls-ca を起動すると CRL に反映される」 | |
 | RV-05 | `curl --noproxy '*' -sS --cacert /etc/mtls-ca/root.crt https://ca.internal.example.com:8443/crl -o crl.der && openssl crl -inform DER -in crl.der -out crl.pem && openssl crl -in crl.pem -noout -text` | `Revoked Certificates:` に app2 のシリアルと `CRL Reason Code: Key Compromise` | |
 | RV-06 | `for c in $A $P; do sudo openssl verify -crl_check -CAfile $c/ca.pem -untrusted $c/chain.pem -CRLfile crl.pem $c/cert.pem; done` | app1 は `OK`、app2 は `certificate revoked` | |
-| RV-07 | app2 の証明書の有効期限（`sudo mtls-agent check -config /etc/mtls-agent-app2/config.yaml` の `有効期限`）を過ぎてから、AP-10 をもう一度実行し、`sudo mtls-agent check -config /etc/mtls-agent-app2/config.yaml; echo $?` | AP-10 が `400`（期限切れの証明書は TLS の検証で拒否される）。`check` は `状態: 更新が必要 – 有効期限が切れている`、終了コード 1 | |
+| RV-07 | app2 の証明書の有効期限（`sudo mtls-agent check -config /etc/mtls-agent-app2/config.yaml` の `有効期限`）を過ぎてから、`sudo systemctl reload nginx` の後に AP-10 をもう一度実行し、`sudo mtls-agent check -config /etc/mtls-agent-app2/config.yaml; echo $?` | AP-10 が `400`（期限切れの証明書は TLS の検証で拒否される）。`check` は `状態: 更新が必要 – 有効期限が切れている`、終了コード 1 | |
 
 > **注意**: `mtls` ライブラリと mtls-agent は CRL を確かめません（[運用ガイド](operations.md#証明書を失効させる)）。
 > 失効させても、Go のアプリ（AP-01 の形）は有効期限まで接続を受け付けます。急ぐ場合は、相手側の許可リスト（`AllowedPeers`）から外します。
@@ -432,6 +433,7 @@ Go のサーバの例を動かした端末は Ctrl+C で止めます。
 - **nginx の `ssl_crl` は、この CA の CRL だけでは使えません。** nginx は CRL を指定すると、チェーンのすべての段（中間 CA を発行したルート CA の段も含む）の CRL を求めます。
   mtls-ca が配るのは中間 CA の CRL だけで、ルート CA の CRL はありません。そのため、`ssl_crl` に CA の CRL を指定すると、
   失効していない証明書も含めてすべての接続が `400`（error.log に `unable to get certificate CRL`）になります。
+  回避するには、ルート CA の空の CRL（中間 CA を失効させていないもの）を、オフラインの端末でルート CA の鍵を使って作り、CA の CRL と 1 つのファイルに並べて指定します。ルート CA の CRL にも有効期限があるので、定期的に作り直す必要があります。今の `mtlsctl` にはこの機能が無く、ルート CA の CRL を作る機能（`mtlsctl root crl` など）は今後の課題です。
   失効の確認は、RV-05・RV-06 のとおり openssl で行ってください。
 
 ## 結果のまとめ

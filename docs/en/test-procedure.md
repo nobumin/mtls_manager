@@ -392,7 +392,8 @@ sudo nginx -t && sudo systemctl restart nginx
 | AP-12 | `curl --noproxy '*' -sS -o /dev/null -w '%{http_code}\n' --cacert $A/ca.pem --cert fake/app1.crt --key fake/app1.key https://web1.internal.example.com:9443/` (another root CA) | `400` (The SSL certificate error) | |
 
 nginx needs a reload to pick up new certificates (in production use `deploy/systemd/mtls-reload-nginx.path`; see [getting started 6.](getting-started.md#nginx)).
-This test does not reload on every renewal, so if you are more than 15 minutes in, run `sudo systemctl reload nginx` before AP-09.
+This test does not reload on every renewal, so **run `sudo systemctl reload nginx` before every nginx item (AP-09 to AP-12, RV-03, RV-07)**.
+The web1 certificate nginx loaded expires in 15 minutes; without a reload, curl fails on the expired server certificate (`certificate has expired`, `%{http_code}` is `000`) before reaching the result being tested.
 
 ## 5. Revocation and EAB key revocation
 
@@ -402,11 +403,11 @@ Treat app2 as a decommissioned server: revoke its EAB key and revoke its certifi
 | --- | --- | --- | --- |
 | RV-01 | Find app2's kid with `sudo mtlsctl eab list -file /etc/mtls-ca/eab.json`, then `sudo mtlsctl eab revoke -file /etc/mtls-ca/eab.json -kid <app2's kid>` | 「EAB 鍵 … を取り消した。この鍵で登録したサーバは、以後新しい証明書を取得できない」 (revoked; servers registered with it can no longer get certificates). app2 disappears from `eab list` | |
 | RV-02 | `sudo mtls-agent renew -config /etc/mtls-agent-app2/config.yaml -force; echo $?` | `403 urn:ietf:params:acme:error:unauthorized: このアカウントの EAB 鍵は取り消されている` (this account's EAB key has been revoked), exit code 1 (applied without restarting the CA) | |
-| RV-03 | Run AP-10 again | Still `403` (TLS verification passes): certificates already issued remain usable until they expire | |
+| RV-03 | After `sudo systemctl reload nginx`, run AP-10 again | Still `403` (TLS verification passes): certificates already issued remain usable until they expire | |
 | RV-04 | Stop the CA and revoke app2's certificate:<br>`sudo systemctl stop mtls-ca`<br>`sudo -u mtls-ca mtls-ca certs -config /etc/mtls-ca/config.yaml`<br>`sudo -u mtls-ca mtls-ca revoke -config /etc/mtls-ca/config.yaml -serial <app2's serial> -reason 1`<br>`sudo systemctl start mtls-ca` | `certs` lists the issued certificates (use the SERIAL of app2's row). 「証明書 … を失効させた。mtls-ca を起動すると CRL に反映される」 (revoked; reflected in the CRL when mtls-ca starts) | |
 | RV-05 | `curl --noproxy '*' -sS --cacert /etc/mtls-ca/root.crt https://ca.internal.example.com:8443/crl -o crl.der && openssl crl -inform DER -in crl.der -out crl.pem && openssl crl -in crl.pem -noout -text` | `Revoked Certificates:` lists app2's serial with `CRL Reason Code: Key Compromise` | |
 | RV-06 | `for c in $A $P; do sudo openssl verify -crl_check -CAfile $c/ca.pem -untrusted $c/chain.pem -CRLfile crl.pem $c/cert.pem; done` | app1 is `OK`; app2 is `certificate revoked` | |
-| RV-07 | After app2's certificate expires (the `有効期限` (expiry) in `sudo mtls-agent check -config /etc/mtls-agent-app2/config.yaml`), run AP-10 again, then `sudo mtls-agent check -config /etc/mtls-agent-app2/config.yaml; echo $?` | AP-10 returns `400` (expired certificates fail TLS verification). `check` shows `更新が必要 – 有効期限が切れている` (renewal needed; expired), exit code 1 | |
+| RV-07 | After app2's certificate expires (the `有効期限` (expiry) in `sudo mtls-agent check -config /etc/mtls-agent-app2/config.yaml`), run `sudo systemctl reload nginx` and AP-10 again, then `sudo mtls-agent check -config /etc/mtls-agent-app2/config.yaml; echo $?` | AP-10 returns `400` (expired certificates fail TLS verification). `check` shows `更新が必要 – 有効期限が切れている` (renewal needed; expired), exit code 1 | |
 
 > **Note**: the `mtls` library and mtls-agent do not check the CRL ([operations guide](operations.md#revoking-a-certificate)).
 > After revocation, Go applications (as in AP-01) keep accepting the certificate until it expires. In urgent cases, remove the peer from the allow list (`AllowedPeers`).
@@ -434,6 +435,7 @@ Stop the Go server example with Ctrl+C in its terminal.
 - **nginx's `ssl_crl` cannot be used with this CA's CRL alone.** When a CRL is configured, nginx requires CRLs for every level of the chain (including the root CA level that issued the intermediate).
   mtls-ca publishes only the intermediate CA's CRL; there is no root CA CRL. As a result, setting the CA's CRL in `ssl_crl` makes
   every connection fail with `400` (error.log: `unable to get certificate CRL`), including certificates that are not revoked.
+  To work around it, create an empty root CA CRL (one that revokes no intermediate) with the root CA key on the offline machine, and put it in one file together with the CA's CRL. The root CA CRL also expires, so it must be recreated regularly. `mtlsctl` cannot do this yet; a command to create the root CA CRL (such as `mtlsctl root crl`) is future work.
   Check revocation with openssl as in RV-05 and RV-06.
 
 ## Summary of results
