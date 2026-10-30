@@ -2,8 +2,8 @@
 
 [日本語](../ja/federation-design.md)
 
-> **Status: stages 1 and 2, plus root CA rotation announcements from stage 3 (11.), implemented** (stage 1: scoped verification in the `mtls` library,
-> `mtlsctl federation`, trust bundle distribution by the CA, mtls-agent outputs; stage 2: the admin UI's "Federation" page). Automatic CA-to-CA updates (12.) and CRL fetching (9-3) from stage 3 are not implemented yet ([15.](#15-implementation-stages)). See the [operations guide](operations.md#federating-with-another-organization) for usage.
+> **Status: stages 1 and 2, plus root CA rotation announcements from stage 3 (11.), implemented. Federation work is complete for now** (stage 1: scoped verification in the `mtls` library,
+> `mtlsctl federation`, trust bundle distribution by the CA, mtls-agent outputs; stage 2: the admin UI's "Federation" page). Automatic CA-to-CA updates (12.) and CRL fetching (9-3) from stage 3 were deliberately left out for now ([16.](#16-open-decisions) #5 and #6). See the [operations guide](operations.md#federating-with-another-organization) for usage.
 
 ## 1. Purpose and scope
 
@@ -328,7 +328,7 @@ nginx and similar software cannot check "a scope per root CA" or the "accepted c
 
 - Revocation of a partner's certificates relies, as before, on **short lifetimes** (24 hours by default) to bound exposure
 - In urgent cases, suspend the federation itself (10.) or remove the peer from `AllowedPeers`
-- (Stage 3) Consider having mtls-ca fetch the partner's CRL and include revoked serials in the trust bundle
+- Having mtls-ca fetch the partner's CRL and include revoked serials in the trust bundle is **not implemented for now** (16. #6): certificates expire in 24 hours by default, and in urgent cases suspending the federation takes effect within 1 minute by default
 
 ## 10. Suspending a federation
 
@@ -350,7 +350,7 @@ The root CA key is offline, so rotation can be planned ahead.
    - **the partner identifier** (the old root's fingerprint)
    - **the scope**, which must **not exceed** the old root's scope (an announcement cannot widen the scope; widening needs the normal approval in 7-3 and 7-4)
    - **an announcement expiry** (e.g. 90 days). Expired announcements are refused (so an old announcement cannot be replayed to bring back a retired root)
-2. The announcement and the new root certificate are handed over like a federation record (in stage 3 the CAs fetch them automatically)
+2. The announcement and the new root certificate are handed over manually, like a federation record (automatic CA-to-CA exchange (12.) is not implemented)
 3. The receiving side **verifies the announcement's signature with the old root it currently trusts**, checks the contents above (identifier, scope, expiry),
    and puts the new root into pending approval as "the next root of the same partner". If the signature is valid, no fingerprint comparison is needed
    (the old root vouches for the new one). One approval is enough (premised on the scope not being widenable and the announcement having an expiry)
@@ -361,7 +361,10 @@ In that case, suspend the federation (10.) and redo the first federation (7-1 to
 
 Intermediate CA rotation needs no partner action, since the root CA is unchanged (as today).
 
-## 12. Automatic CA-to-CA updates (stage 3, optional)
+## 12. Automatic CA-to-CA updates (deferred)
+
+> **Decided not to implement this for now** (16. #5). Root rotation announcements are rare, roughly yearly work, so a manual handover is enough.
+> Revocation (CRL) is likewise covered by short lifetimes and suspension (9-3). The following is kept as a proposal in case it is added later.
 
 Where CAs can reach each other, the following can be automated, so manual comparison is needed only the first time.
 
@@ -405,7 +408,7 @@ Where CAs can reach each other, the following can be automated, so manual compar
 | --- | --- | --- |
 | 1 | Scoped verification and bundle reloading in the `mtls` library. `mtlsctl federation export / import / approve / suspend` (file-based). Bundle fetching and output in mtls-agent. The CA's `/federation/bundle` | A and B federate with a manual exchange |
 | 2 | The admin UI's "Federation" page (import, comparison, two-person approval, suspension, expiry warnings). Audit logs. Operating procedures for nginx | Operators manage federation in the UI |
-| 3 | Root rotation announcements (`mtlsctl root announce`) and following them. The CA-to-CA federation endpoint (automatic updates, CRL fetching) | No manual work after the first time |
+| 3 | Root rotation announcements (`mtlsctl root announce`) and following them (implemented). The CA-to-CA federation endpoint (automatic updates, CRL fetching) is deferred (16. #5, #6) | Root CAs can be rotated without breaking federation |
 
 Each stage adds tests to CI. Stage 1 checks at least:
 
@@ -430,8 +433,8 @@ The following must be decided before implementation.
 | 2 | Approach for in-house use | **Decided: use the federated version.** Sharing the root CA with one intermediate per network (the alternative in 2.) remains a simple option that needs no implementation |
 | 3 | Two-person approval | **Decided: required** (including in-house; no setting to make it one person) |
 | 4 | Support for nginx etc. | Is the "separate ports" procedure in 9-2 enough, or should a sidecar be provided? |
-| 5 | Automatic CA-to-CA updates (stage 3) | Needed? Does the network allow CA-to-CA traffic? |
-| 6 | Revocation of partner certificates | Are short lifetimes enough, or should CRLs be fetched? |
+| 5 | Automatic CA-to-CA updates (stage 3) | **Decided: not for now.** Rotation announcements are rare, roughly yearly work, so a manual handover is enough |
+| 6 | Revocation of partner certificates | **Decided: short lifetimes only (CRLs are not fetched).** Certificates expire in 24 hours by default, and in urgent cases suspending the federation takes effect within 1 minute by default |
 | 7 | Federation expiry | Is the default of 1 year acceptable? |
 | 8 | Trust bundle expiry | Default 2 days (decided). It is both "the worst-case time a suspension may fail to arrive" and "how long a CA outage is tolerated" (8-1, 10.) |
 | 9 | Protection against CA server compromise (stage 2 and later) | Should approval results (partner root fingerprint and scope) require a signature by approvers' keys (or the offline root key), so that the online intermediate key alone cannot add partners? (6-4) |
