@@ -1,0 +1,29 @@
+name: 定期検査
+
+# コードを変えていなくても、依存ライブラリに新しい脆弱性が公表されることがあるので、
+# develop と main を週 1 回 govulncheck で確かめる（ci.yml は PR のときだけ動くため）。
+# schedule は既定のブランチ（main）にあるこのファイルで動く。develop に入れただけでは動かない。
+on:
+  schedule:
+    - cron: "17 23 * * 0" # 毎週月曜 8:17（日本時間）
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  vuln:
+    name: 既知の脆弱性（govulncheck, ${{ matrix.ref }}）
+    strategy:
+      fail-fast: false
+      matrix:
+        ref: [develop, main]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.ref }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...

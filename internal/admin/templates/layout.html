@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} - mtls-ca 管理画面</title>
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/forms.js" defer></script>
+</head>
+<body>
+<header>
+  <div class="brand">mtls-ca 管理画面</div>
+  <nav>
+    <a href="/" {{if eq .Page "dashboard"}}class="active"{{end}}>概要</a>
+    <a href="/certs" {{if eq .Page "certs"}}class="active"{{end}}>発行済み証明書</a>
+    <a href="/eab" {{if eq .Page "eab"}}class="active"{{end}}>EAB 鍵</a>
+    <a href="/federation" {{if eq .Page "federation"}}class="active"{{end}}>連携</a>
+    <a href="/logs" {{if eq .Page "logs"}}class="active"{{end}}>ログ</a>
+  </nav>
+  <div class="who">{{.Admin}}</div>
+</header>
+<main>
+<h1>{{.Title}}</h1>
+{{if .Flash}}<div class="flash{{if .FlashBad}} bad{{end}}" role="status">{{.Flash}}</div>{{end}}
+{{template "content" .}}
+</main>
+<footer>mtls-ca {{.Version}} ・ 表示時刻 {{fmtTime .Now}} ・ {{if .Operator}}変更の操作ができる管理者{{else}}閲覧のみ{{end}}</footer>
+</body>
+</html>

@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  mtls-agent の launchd 設定例（macOS）/ Example launchd job for mtls-agent (macOS)
+
+    sudo install -m 0755 mtls-agent /usr/local/bin/
+    sudo install -m 0644 io.github.nobumin.mtls-agent.plist /Library/LaunchDaemons/
+    sudo launchctl bootstrap system /Library/LaunchDaemons/io.github.nobumin.mtls-agent.plist
+
+  すぐに更新する / Renew now:  sudo launchctl kill HUP system/io.github.nobumin.mtls-agent
+  停止する / Stop:              sudo launchctl bootout system/io.github.nobumin.mtls-agent
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>io.github.nobumin.mtls-agent</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/mtls-agent</string>
+    <string>run</string>
+    <string>-config</string>
+    <string>/usr/local/etc/mtls-agent/config.yaml</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/usr/local/var/log/mtls-agent.log</string>
+  <key>StandardErrorPath</key>
+  <string>/usr/local/var/log/mtls-agent.log</string>
+  <key>Umask</key>
+  <integer>18</integer>
+</dict>
+</plist>

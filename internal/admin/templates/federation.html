@@ -1,0 +1,138 @@
+{{define "content"}}{{with .Data}}
+{{if not .Enabled}}
+<p class="muted">連携版（別々の mtls-ca で管理するサーバとの mTLS）は有効でない。使うには、CA の設定に <span class="mono">federation.file</span> を指定する。</p>
+{{else}}
+<p class="muted">連携先のルート CA を、承認した範囲の名前に限って信頼する。承認は申請者と別の管理者が行う（管理者の名前は、この画面へのログインに使った証明書で確かめる）。停止は 1 人ですぐにできる。</p>
+
+<h2>自分の連携情報</h2>
+<table class="kv">
+  <tr><th>自分の範囲（中間 CA の名前制約）</th><td>{{join .OwnScope ", "}}</td></tr>
+  <tr><th>ルート CA の指紋</th><td class="mono">{{.OwnFingerprint}}</td></tr>
+</table>
+<form class="filter" method="get" action="/federation/export">
+  <input type="text" name="org" maxlength="200" placeholder="組織の名前（相手には未検証の参考情報として表示される）">
+  <input type="text" name="contacts" maxlength="400" placeholder="連絡先（カンマ区切り）">
+  <button type="submit">連携情報を書き出す（JSON）</button>
+</form>
+<p class="muted">書き出したファイルを相手に渡す（秘密情報は含まない）。相手とは、上の指紋の全体を、ファイルとは別の経路で読み合わせる。</p>
+
+{{if $.Operator}}
+<h2>連携先を取り込む</h2>
+<form class="action" method="post" action="/federation/import">
+  <input type="hidden" name="csrf" value="{{$.CSRF}}">
+  <label>識別子（自分の側で付ける。英小文字・数字・ハイフンの 1〜32 文字。ファイル名に使う）
+    <input type="text" name="id" maxlength="32" pattern="[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?" required></label>
+  <label>相手から受け取った連携情報（JSON をそのまま貼り付ける）
+    <textarea name="record" rows="6" required></textarea></label>
+  <button type="submit">取り込む（承認待ちになる。まだ信頼しない）</button>
+</form>
+{{end}}
+
+<h2>連携先</h2>
+<table>
+  <thead><tr><th>識別子</th><th>状態</th><th>範囲</th><th>有効期限</th><th>申請・承認</th></tr></thead>
+  <tbody>
+  {{range .Partners}}
+    <tr class="{{if .ExpiresWarn}}row-warn{{end}}">
+      <td class="mono">{{.ID}}</td>
+      <td><span class="badge {{if eq .State "active"}}ok{{else if eq .State "suspended"}}bad{{else}}warn{{end}}">{{.State}}</span></td>
+      <td>{{if .Domains}}{{join .Domains ", "}}{{else}}{{join .DeclaredDomains ", "}}（申告）{{end}}</td>
+      <td>{{fmtTime .Expires}}</td>
+      <td>{{if .RequestedBy}}申請 {{.RequestedBy}}{{end}}{{if .ApprovedBy}} ／ 承認 {{.ApprovedBy}}{{end}}{{if .SelfDeclared}} <span class="badge warn">CLI（自己申告）を含む</span>{{end}}</td>
+    </tr>
+    <tr><td colspan="5">
+      <details>
+        <summary>詳細・操作</summary>
+        <table class="kv">
+          <tr><th>指紋（4 桁ずつ）</th><td class="mono">{{.FingerprintGroups}}</td></tr>
+          <tr><th>組織・連絡先</th><td>{{.Organization}} {{join .Contacts ", "}} <span class="badge warn">未検証（相手の申告）</span></td></tr>
+          <tr><th>申告された範囲</th><td>{{join .DeclaredDomains ", "}}</td></tr>
+          <tr><th>照合した相手と経路</th><td>{{.ComparedWith}}</td></tr>
+          {{if .NextState}}<tr><th>次のルート（入れ替え中）</th><td class="mono">{{.NextFingerprintGroups}}</td></tr>
+          <tr><th>次のルートの状態</th><td>{{if eq .NextState "active"}}承認済み（新旧の両方を信頼している）{{else}}承認待ち{{end}}・切り替えの予定日 {{fmtTime .NextSwitchAt}}</td></tr>{{end}}
+        </table>
+        <ul class="muted">{{range .Events}}<li>{{fmtTime .At}} {{.Action}} {{.By}}{{if ne .Via "admin-ui"}}（CLI・自己申告）{{end}} {{.Detail}}</li>{{end}}</ul>
+        {{if $.Operator}}
+          {{if or (eq .State "pending") (eq .State "suspended")}}
+          <form class="action" method="post" action="/federation/request">
+            <input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="id" value="{{.ID}}">
+            <strong>承認を申請する（1 人目）</strong>
+            <label>照合のときに読み上げを聞いて、指紋の全体（64 桁）を入力する（貼り付けはできない）
+              <input type="text" name="fingerprint" class="mono" autocomplete="off" data-nopaste required></label>
+            <label>照合した相手と経路（ファイルとは無関係に前もって知っている連絡先。例: 契約書記載の○○部 △△ 氏、電話）
+              <input type="text" name="compared_with" maxlength="300" required></label>
+            <label>承認する範囲（空なら申告どおり。狭めることだけができる）
+              <input type="text" name="domains" placeholder="{{join .DeclaredDomains ", "}}"></label>
+            <label>連携の有効期限（日。空なら 365）
+              <input type="number" name="validity_days" min="1" max="730"></label>
+            <button type="submit">申請する</button>
+          </form>
+          {{end}}
+          {{if .CanApprove}}
+          <form class="action" method="post" action="/federation/approve" data-confirm="連携先 {{.ID}} を承認する。範囲 {{join .Domains ", "}} の名前で、相手のルート CA を信頼する。">
+            <input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="id" value="{{.ID}}">
+            <strong>承認する（申請者 {{.RequestedBy}} とは別の管理者）</strong>
+            <label>指紋の全体（64 桁）を入力する（貼り付けはできない）
+              <input type="text" name="fingerprint" class="mono" autocomplete="off" data-nopaste required></label>
+            <label><input type="checkbox" name="confirm" value="yes" required> 申請の内容（範囲・照合した相手）を確かめた</label>
+            <button type="submit">承認する</button>
+          </form>
+          {{else if eq .State "requested"}}
+          {{if .RequestedViaCLI}}<p class="muted">CLI で申請された（名前は自己申告）。承認は申請と同じ経路で行うので、画面では承認できない。画面で承認するには、停止してから画面で申請し直す。</p>
+          {{else}}<p class="muted">承認待ち。申請者（{{.RequestedBy}}）とは別の管理者が承認する。</p>{{end}}
+          {{end}}
+          {{if eq .State "active"}}
+          {{if not .NextState}}
+          <form class="action" method="post" action="/federation/announce">
+            <input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="id" value="{{.ID}}">
+            <strong>ルート CA の入れ替えの予告を取り込む</strong>
+            <label>連携先から受け取った予告（古いルートで署名したもの）を貼り付ける。署名は、いま信頼しているルートで確かめる（指紋の照合は不要）
+              <textarea name="announcement" rows="3" required></textarea></label>
+            <button type="submit">取り込む</button>
+          </form>
+          {{else if eq .NextState "pending"}}
+          <form class="inline" method="post" action="/federation/approve-next" data-confirm="連携先 {{.ID}} の次のルートを承認する。新旧の両方のルートを同じ範囲で信頼する。">
+            <input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="id" value="{{.ID}}">
+            <label><input type="checkbox" name="confirm" value="yes" required> 確認</label>
+            <button type="submit">次のルートを承認する</button>
+          </form>
+          {{else}}
+          <form class="inline" method="post" action="/federation/retire-root" data-confirm="連携先 {{.ID}} の古いルートを外す。相手が新しいルートで発行し始めてから行う。">
+            <input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="id" value="{{.ID}}">
+            <label><input type="checkbox" name="confirm" value="yes" required> 確認</label>
+            <button type="submit">古いルートを外す</button>
+          </form>
+          {{end}}
+          {{if .NextState}}
+          <form class="inline" method="post" action="/federation/cancel-next" data-confirm="連携先 {{.ID}} の次のルートを取り消す。">
+            <input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="id" value="{{.ID}}">
+            <label><input type="checkbox" name="confirm" value="yes" required> 確認</label>
+            <button type="submit" class="danger">次のルートを取り消す</button>
+          </form>
+          {{end}}
+          {{end}}
+          {{if ne .State "suspended"}}
+          <form class="inline" method="post" action="/federation/suspend" data-confirm="連携先 {{.ID}} を停止する。各サーバは、次のトラストバンドルの取得から相手を信頼しなくなる。">
+            <input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="id" value="{{.ID}}">
+            <input type="text" name="reason" maxlength="300" placeholder="理由">
+            <label><input type="checkbox" name="confirm" value="yes" required> 確認</label>
+            <button type="submit" class="danger">停止する</button>
+          </form>
+          {{end}}
+          {{if ne .State "active"}}
+          <form class="inline" method="post" action="/federation/remove" data-confirm="連携先 {{.ID}} を消す。操作の記録も消える。">
+            <input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="id" value="{{.ID}}">
+            <label><input type="checkbox" name="confirm" value="yes" required> 確認</label>
+            <button type="submit" class="danger">消す</button>
+          </form>
+          {{end}}
+        {{end}}
+      </details>
+    </td></tr>
+  {{else}}
+    <tr><td colspan="5" class="muted">連携先はない</td></tr>
+  {{end}}
+  </tbody>
+</table>
+{{end}}
+{{end}}{{end}}

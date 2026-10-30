@@ -1,0 +1,19 @@
+# 証明書の更新を検知して nginx を reload する例 / Reload nginx when the certificate changes
+#
+# mtls-agent に nginx を操作する権限を持たせずに済む（reload は root の systemd が行う）。
+# mtls-agent does not need privileges to reload nginx; systemd (root) does it.
+#
+#   sudo install -m 0644 mtls-reload-nginx.path mtls-reload-nginx.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now mtls-reload-nginx.path
+#
+# mtls-agent は鍵 → 証明書の順に書くので、最後に書かれる cert（output.cert）を監視する。
+# mtls-agent writes the key first and the certificate last, so watch output.cert.
+[Unit]
+Description=Watch the mTLS certificate and reload nginx
+
+[Path]
+PathChanged=/etc/mtls-agent/tls/cert.pem
+Unit=mtls-reload-nginx.service
+
+[Install]
+WantedBy=multi-user.target
