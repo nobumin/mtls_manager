@@ -439,7 +439,7 @@ func fedAnnounce(args []string) error {
 	}
 	var p federation.Partner
 	if err := federation.Update(env.file, func(f *federation.File) error {
-		if err := f.ImportAnnouncement(*id, strings.TrimSpace(string(data)), federation.ByCLI(who), time.Now()); err != nil {
+		if err := f.ImportAnnouncement(*id, strings.TrimSpace(string(data)), env.roots, federation.ByCLI(who), time.Now()); err != nil {
 			return err
 		}
 		p = *f.Find(*id)

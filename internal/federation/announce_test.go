@@ -37,6 +37,7 @@ func activePartner(t *testing.T, root *x509.Certificate) *federation.File {
 
 // 予告の取り込み → 次のルートの承認 → バンドルに新旧の両方 → 古いルートを外す。
 func TestRootRotation(t *testing.T) {
+	own := ownRoots(t)
 	oldB, oldKey := testca.NewIssuerWithRootKey(t, domainB)
 	newB := testca.NewIssuer(t, domainB)
 	f := activePartner(t, oldB.Root)
@@ -53,7 +54,7 @@ func TestRootRotation(t *testing.T) {
 	if err := f.ApproveNext("b-corp", federation.ByCLI("carol"), now); err == nil {
 		t.Error("予告の前に次のルートを承認できた")
 	}
-	if err := f.ImportAnnouncement("b-corp", compact, federation.ByCLI("carol"), now); err != nil {
+	if err := f.ImportAnnouncement("b-corp", compact, own, federation.ByCLI("carol"), now); err != nil {
 		t.Fatal(err)
 	}
 	p := f.Find("b-corp")
@@ -86,6 +87,7 @@ func TestRootRotation(t *testing.T) {
 
 // 予告の拒否: 別の鍵の署名・範囲の拡大・期限切れ・有効でない連携先。
 func TestAnnouncementRejected(t *testing.T) {
+	own := ownRoots(t)
 	oldB, oldKey := testca.NewIssuerWithRootKey(t, domainB)
 	newB := testca.NewIssuer(t, domainB)
 	other, otherKey := testca.NewIssuerWithRootKey(t, domainB)
@@ -109,19 +111,19 @@ func TestAnnouncementRejected(t *testing.T) {
 	}
 	for name, c := range cases {
 		f := activePartner(t, oldB.Root)
-		if err := f.ImportAnnouncement("b-corp", c, federation.ByCLI("carol"), now); err == nil {
+		if err := f.ImportAnnouncement("b-corp", c, own, federation.ByCLI("carol"), now); err == nil {
 			t.Errorf("%s: 取り込めた", name)
 		}
 	}
 	// 停止中の連携先には使えない（初回と同じ連携をやり直す）。
 	f := activePartner(t, oldB.Root)
 	_ = f.Suspend("b-corp", federation.ByCLI("carol"), "", now)
-	if err := f.ImportAnnouncement("b-corp", sign(oldB.Root, oldKey, []string{domainB}, now), federation.ByCLI("carol"), now); err == nil {
+	if err := f.ImportAnnouncement("b-corp", sign(oldB.Root, oldKey, []string{domainB}, now), own, federation.ByCLI("carol"), now); err == nil {
 		t.Error("停止中の連携先に予告を取り込めた")
 	}
 	// 申請し直すと、次のルートは消える（照合し直す）。
 	f = activePartner(t, oldB.Root)
-	if err := f.ImportAnnouncement("b-corp", sign(oldB.Root, oldKey, []string{domainB}, now), federation.ByCLI("carol"), now); err != nil {
+	if err := f.ImportAnnouncement("b-corp", sign(oldB.Root, oldKey, []string{domainB}, now), own, federation.ByCLI("carol"), now); err != nil {
 		t.Fatal(err)
 	}
 	_ = f.Suspend("b-corp", federation.ByCLI("carol"), "", now)
@@ -132,12 +134,69 @@ func TestAnnouncementRejected(t *testing.T) {
 	if f.Find("b-corp").NextState != "" {
 		t.Error("申請し直しても次のルートが残った")
 	}
+	// 次のルートがすでにある（承認待ち・承認済み）ときは、別の予告で黙って置き換えない。
+	for _, approve := range []bool{false, true} {
+		f = activePartner(t, oldB.Root)
+		if err := f.ImportAnnouncement("b-corp", sign(oldB.Root, oldKey, []string{domainB}, now), own, federation.ByCLI("carol"), now); err != nil {
+			t.Fatal(err)
+		}
+		if approve {
+			if err := f.ApproveNext("b-corp", federation.ByCLI("carol"), now); err != nil {
+				t.Fatal(err)
+			}
+		}
+		state := f.Find("b-corp").NextState
+		newer := testca.NewIssuer(t, domainB)
+		a, err := federation.NewAnnouncement(oldB.Root, newer.Root, []string{domainB}, now, 90*24*time.Hour, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		c, err := federation.SignAnnouncement(a, oldB.Root, oldKey)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := f.ImportAnnouncement("b-corp", c, own, federation.ByCLI("carol"), now); err == nil || !strings.Contains(err.Error(), "cancel-next") {
+			t.Errorf("次のルート（%s）があるのに別の予告を取り込めた: %v", state, err)
+		}
+		if p := f.Find("b-corp"); p.NextState != state || !federation.FingerprintEqual(p.NextRootSHA256, federation.Fingerprint(newB.Root)) {
+			t.Errorf("次のルート（%s）が置き換わった: %+v", state, p)
+		}
+		// 取り消した後なら取り込める。
+		if err := f.CancelNext("b-corp", federation.ByCLI("carol"), now); err != nil {
+			t.Fatal(err)
+		}
+		if err := f.ImportAnnouncement("b-corp", c, own, federation.ByCLI("carol"), now); err != nil {
+			t.Errorf("取り消した後に取り込めない: %v", err)
+		}
+	}
+	// 新しいルートが自分のルート CA と同じ予告は拒否する（承認すると連携先ごとバンドルから外れるため）。
+	f = activePartner(t, oldB.Root)
+	a, err := federation.NewAnnouncement(oldB.Root, own[0], []string{domainB}, now, 90*24*time.Hour, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := federation.SignAnnouncement(a, oldB.Root, oldKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.ImportAnnouncement("b-corp", c, own, federation.ByCLI("carol"), now); err == nil {
+		t.Error("新しいルートが自分のルート CA と同じ予告を取り込めた")
+	}
+	if err := f.ImportAnnouncement("b-corp", c, nil, federation.ByCLI("carol"), now); err == nil {
+		t.Error("自分のルート CA なしで予告を取り込めた")
+	}
 	// 予告そのものの改ざん。
-	c := sign(oldB.Root, oldKey, []string{domainB}, now)
+	c = sign(oldB.Root, oldKey, []string{domainB}, now)
 	parts := strings.Split(c, ".")
 	if _, _, err := federation.VerifyAnnouncement(parts[0]+"."+parts[1]+"x."+parts[2], oldB.Root, now); err == nil {
 		t.Error("改ざんした予告を受け入れた")
 	}
+}
+
+// ownRoots は自分（A）のルート CA の一覧を返す。
+func ownRoots(t *testing.T) []*x509.Certificate {
+	t.Helper()
+	return []*x509.Certificate{testca.NewIssuer(t, domainA).Root}
 }
 
 // buildAndVerify は f の内容でバンドルを作り（a の中間 CA で署名）、検証した結果を返す。

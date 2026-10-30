@@ -217,7 +217,8 @@ When a partner rotates its root CA, it sends **an announcement signed with its o
    sudo mtlsctl federation announce -config /etc/mtls-ca/config.yaml -id b-corp -in announce.jws
    ```
 
-   Announcements that widen the scope, have expired, or target a suspended partner are refused.
+   Announcements that widen the scope, have expired, target a suspended partner, or name your own root CA as the new root are refused.
+   They are also refused while a next root already exists (pending or approved), so it is never silently replaced. To import a different announcement, cancel the existing one first with `mtlsctl federation cancel-next`.
 2. Approve the next root (one person is enough). Once approved, both old and new roots are trusted with the same scope.
 
    ```sh

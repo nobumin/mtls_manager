@@ -312,7 +312,7 @@ func (s *Server) handleFedAnnounce(w http.ResponseWriter, r *http.Request) {
 	}
 	compact := strings.TrimSpace(r.PostForm.Get("announcement"))
 	if err := s.fedUpdate(func(f *federation.File) error {
-		return f.ImportAnnouncement(id, compact, federation.ByAdmin(admin), time.Now())
+		return f.ImportAnnouncement(id, compact, s.fed.OwnRoots(), federation.ByAdmin(admin), time.Now())
 	}); err != nil {
 		s.log.Warn("管理画面: ルート CA の入れ替えの予告を取り込めない", "category", "audit", "admin", admin, "partner", id, "err", err)
 		s.fail(w, r, "federation", http.StatusBadRequest, "予告を取り込めない: "+err.Error())

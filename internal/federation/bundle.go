@@ -313,6 +313,9 @@ func NewBuilder(store *Store, inter *x509.Certificate, key crypto.Signer, ownRoo
 // OwnScope は自分の範囲（中間 CA の名前制約）を返す。
 func (b *Builder) OwnScope() []string { return slices.Clone(b.ownScope) }
 
+// OwnRoots は自分のルート CA（CAFile）を返す。
+func (b *Builder) OwnRoots() []*x509.Certificate { return slices.Clone(b.ownRoots) }
+
 // Current は現在のバンドル（JWS）と ETag を返す。必要なら作り直す。
 func (b *Builder) Current(now time.Time) (string, string, error) {
 	f, changed, err := b.store.Snapshot()

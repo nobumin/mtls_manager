@@ -137,13 +137,21 @@ func VerifyAnnouncement(compact string, oldRoot *x509.Certificate, now time.Time
 
 // ImportAnnouncement は連携先のルート CA の入れ替えの予告を取り込み、新しいルートを承認待ちにする。
 // 有効な連携先だけが対象で、署名はいま信頼している（承認済みの）ルート CA で確かめる。
-func (f *File) ImportAnnouncement(id, compact string, by Actor, now time.Time) error {
+// ownRoots は自分のルート CA（CAFile。入れ替え中は新旧の 2 つ）で、新しいルートがこれと同じ予告は拒否する。
+// 次のルートがすでにある（承認待ち・承認済み）ときも拒否する（黙って置き換えない。先に取り消す）。
+func (f *File) ImportAnnouncement(id, compact string, ownRoots []*x509.Certificate, by Actor, now time.Time) error {
+	if len(ownRoots) == 0 {
+		return errors.New("自分のルート CA が無い")
+	}
 	p := f.Find(id)
 	if p == nil {
 		return fmt.Errorf("連携先 %q が無い", id)
 	}
 	if p.State != StateActive {
 		return fmt.Errorf("連携先 %q は %s の状態（予告は有効な連携先にだけ使える。停止中なら初回と同じ連携をやり直す）", id, p.State)
+	}
+	if p.NextState != "" {
+		return fmt.Errorf("連携先 %q には次のルート（%s の状態）がすでにある（別の予告を取り込むなら、先に次のルートを取り消す（cancel-next））", id, p.NextState)
 	}
 	oldRoot, err := p.Root()
 	if err != nil {
@@ -152,6 +160,11 @@ func (f *File) ImportAnnouncement(id, compact string, by Actor, now time.Time) e
 	a, newRoot, err := VerifyAnnouncement(compact, oldRoot, now)
 	if err != nil {
 		return err
+	}
+	for _, own := range ownRoots {
+		if own.Equal(newRoot) {
+			return errors.New("新しいルート CA が、自分のルート CA と同じ")
+		}
 	}
 	// 予告で範囲は広げられない（相手の申告の範囲を超えない）。承認している範囲は変えない。
 	if !WithinScope(a.Domains, p.DeclaredDomains) {

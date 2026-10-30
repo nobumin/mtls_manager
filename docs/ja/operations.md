@@ -217,7 +217,8 @@ sudo mtlsctl federation suspend -config /etc/mtls-ca/config.yaml -id b-corp -rea
    sudo mtlsctl federation announce -config /etc/mtls-ca/config.yaml -id b-corp -in announce.jws
    ```
 
-   範囲を広げる予告・期限切れの予告・停止中の連携先への予告は受け付けない。
+   範囲を広げる予告・期限切れの予告・停止中の連携先への予告・新しいルートが自分のルート CA と同じ予告は受け付けない。
+   次のルートがすでにある（承認待ち・承認済み）ときも受け付けない（黙って置き換えない）。別の予告を取り込むなら、先に `mtlsctl federation cancel-next` で取り消す。
 2. 次のルートを承認する（1 人でよい）。承認すると、新旧の両方のルートを同じ範囲で信頼する。
 
    ```sh

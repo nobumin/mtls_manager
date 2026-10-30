@@ -353,7 +353,8 @@ The root CA key is offline, so rotation can be planned ahead.
 2. The announcement and the new root certificate are handed over manually, like a federation record (automatic CA-to-CA exchange (12.) is not implemented)
 3. The receiving side **verifies the announcement's signature with the old root it currently trusts**, checks the contents above (identifier, scope, expiry),
    and puts the new root into pending approval as "the next root of the same partner". If the signature is valid, no fingerprint comparison is needed
-   (the old root vouches for the new one). One approval is enough (premised on the scope not being widenable and the announcement having an expiry)
+   (the old root vouches for the new one). One approval is enough (premised on the scope not being widenable and the announcement having an expiry).
+   The announcement is refused while a next root already exists (pending or approved; cancel it first and import again) and when the new root is your own root CA
 4. During the transition, both old and new roots are trusted with the same scope. Once the partner issues under the new root, it announces the retirement of the old root and the receiving side removes it
 
 **Announcements are not used when the rotation is due to compromise of the old root key**, because an announcement signed with a compromised key cannot be trusted.
