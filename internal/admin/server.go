@@ -27,6 +27,7 @@ import (
 
 	"github.com/nobumin/mtls_manager/internal/config"
 	"github.com/nobumin/mtls_manager/internal/eab"
+	"github.com/nobumin/mtls_manager/internal/federation"
 	"github.com/nobumin/mtls_manager/internal/logbuf"
 	"github.com/nobumin/mtls_manager/internal/names"
 	"github.com/nobumin/mtls_manager/internal/pki"
@@ -53,6 +54,8 @@ type Options struct {
 	// Revoke は証明書を失効させる（acmeserver.Server.RevokeByAdmin。CRL に反映するため CA を通す）。
 	// admin.operators を指定する場合は必須。
 	Revoke func(serial string, reason int) error
+	// Federation は連携版のトラストバンドル（自分の範囲を得るのに使う）。nil なら「連携」画面は無効。
+	Federation *federation.Builder
 }
 
 // Server は管理画面。
@@ -71,6 +74,7 @@ type Server struct {
 	revoke    func(serial string, reason int) error
 	csrfKey   []byte
 	once      onceTokens
+	fed       *federation.Builder
 }
 
 // New は Server を作る。
@@ -88,7 +92,7 @@ func New(o Options) (*Server, error) {
 	s := &Server{
 		cfg: o.Config, issuer: o.Issuer, db: o.DB, eab: o.EAB, logs: o.Logs, log: log,
 		started: o.Started, allowed: o.Config.Admin.AllowedPrefixes(), tmpl: map[string]*template.Template{},
-		operators: o.Config.Admin.Operators, revoke: o.Revoke, csrfKey: make([]byte, 32),
+		operators: o.Config.Admin.Operators, revoke: o.Revoke, csrfKey: make([]byte, 32), fed: o.Federation,
 	}
 	if _, err := rand.Read(s.csrfKey); err != nil {
 		return nil, err
@@ -105,8 +109,13 @@ func New(o Options) (*Server, error) {
 		if err := eab.Update(o.Config.EABFile, func(*eab.File) error { return errCheck }); !errors.Is(err, errCheck) {
 			return nil, fmt.Errorf("admin.operators を使うには、mtls-ca が eab_file を更新できる必要がある: %w", err)
 		}
+		if s.cfg.Federation.File != "" && s.fed != nil {
+			if err := checkFederationWritable(s.cfg.Federation.File); err != nil {
+				return nil, fmt.Errorf("admin.operators を使うには、%w", err)
+			}
+		}
 	}
-	for _, page := range []string{"dashboard", "certs", "eab", "logs", "eab_created"} {
+	for _, page := range []string{"dashboard", "certs", "eab", "logs", "eab_created", "federation"} {
 		t, err := template.New("layout.html").Funcs(funcs).ParseFS(templateFS, "templates/layout.html", "templates/"+page+".html")
 		if err != nil {
 			return nil, err
@@ -141,6 +150,17 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /eab/create", s.handleEABCreate)
 	mux.HandleFunc("POST /eab/revoke", s.handleEABRevoke)
 	mux.HandleFunc("POST /certs/revoke", s.handleCertRevoke)
+	mux.HandleFunc("GET /federation", s.page("federation", s.federationData))
+	mux.HandleFunc("GET /federation/export", s.handleFedExport)
+	mux.HandleFunc("POST /federation/import", s.handleFedImport)
+	mux.HandleFunc("POST /federation/request", s.handleFedRequest)
+	mux.HandleFunc("POST /federation/approve", s.handleFedApprove)
+	mux.HandleFunc("POST /federation/suspend", s.handleFedSuspend)
+	mux.HandleFunc("POST /federation/remove", s.handleFedRemove)
+	mux.HandleFunc("POST /federation/announce", s.handleFedAnnounce)
+	mux.HandleFunc("POST /federation/approve-next", s.handleFedNext("approve-next"))
+	mux.HandleFunc("POST /federation/retire-root", s.handleFedNext("retire-root"))
+	mux.HandleFunc("POST /federation/cancel-next", s.handleFedNext("cancel-next"))
 	static, _ := fs.Sub(staticFS, "static")
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(static)))
 	return s.restrictSource(s.requireAdmin(securityHeaders(mux)))
@@ -235,7 +255,7 @@ func (s *Server) page(name string, load func(*http.Request) (any, error)) http.H
 	}
 }
 
-var titles = map[string]string{"dashboard": "概要", "certs": "発行済み証明書", "eab": "EAB 鍵", "logs": "ログ", "eab_created": "EAB 鍵を発行した"}
+var titles = map[string]string{"dashboard": "概要", "certs": "発行済み証明書", "eab": "EAB 鍵", "logs": "ログ", "eab_created": "EAB 鍵を発行した", "federation": "連携"}
 
 func (s *Server) render(w http.ResponseWriter, r *http.Request, status int, name string, data any, flash string, flashBad bool) {
 	admin := mtls.PeerNames(r.TLS)[0]

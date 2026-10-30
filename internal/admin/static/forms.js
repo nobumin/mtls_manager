@@ -7,3 +7,16 @@ document.addEventListener("submit", function (ev) {
     ev.preventDefault();
   }
 });
+
+// 指紋の入力欄（data-nopaste）では、貼り付けとドロップを受け付けない。
+// 照合のときに読み上げを聞いて入力させるため（照合を省いて、取り込んだファイルの値を貼り付けないように）。
+document.addEventListener("paste", function (ev) {
+  if (ev.target && ev.target.hasAttribute && ev.target.hasAttribute("data-nopaste")) {
+    ev.preventDefault();
+  }
+});
+document.addEventListener("drop", function (ev) {
+  if (ev.target && ev.target.hasAttribute && ev.target.hasAttribute("data-nopaste")) {
+    ev.preventDefault();
+  }
+});

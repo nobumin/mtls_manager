@@ -135,7 +135,7 @@ func run(configPath string) error {
 	servers := []*http.Server{hs}
 
 	if cfg.Admin.Listen != "" {
-		adm, err := admin.New(admin.Options{Config: cfg, Issuer: iss, DB: db, EAB: eabStore, Logs: logs, Logger: log, Started: started, Revoke: srv.RevokeByAdmin})
+		adm, err := admin.New(admin.Options{Config: cfg, Issuer: iss, DB: db, EAB: eabStore, Logs: logs, Logger: log, Started: started, Revoke: srv.RevokeByAdmin, Federation: fed})
 		if err != nil {
 			return err
 		}

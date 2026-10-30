@@ -85,6 +85,19 @@ Do this if the root key may have leaked or the root is close to expiring. It tou
 3. Create an intermediate under the new root and switch the CA server to it.
 4. Once every server's certificate has been renewed under the new root (after one day by default), remove the old root from each `ca_root`.
 
+**If you use federation**, partners must also trust the new root CA.
+
+- After step 1 and before step 3, create **an announcement signed with the old root key** on the offline machine and give it to each partner. Partners verify its signature with the old root they currently trust, import it and approve it (no fingerprint comparison is needed).
+
+  ```sh
+  mtlsctl root announce -old-root-cert old/root.crt -old-root-key old/root.key -new-root-cert new/root.crt \
+    -domains a.example.com -switch-at 2026-12-01 -out announce.jws
+  ```
+
+  `-domains` must not exceed the scope declared to partners (an announcement cannot widen the scope). The announcement expires after 90 days by default.
+- After step 4, ask each partner to remove the old root (`retire-root`).
+- **Do not use an announcement if the root key may have leaked** (an announcement signed with a leaked key cannot be trusted). Ask each partner to suspend the federation and redo the first federation (comparison and two-person approval) with the new root CA.
+
 ## Federating with another organization
 
 Connect, with mTLS, servers **managed by separate mtls-cas (separate root CAs)**, such as company A's and company B's servers.
@@ -103,6 +116,9 @@ Add the following to `config.yaml` and restart mtls-ca.
 federation:
   file: "/etc/mtls-ca/federation.json"
 ```
+
+When managing partners from the admin UI (`admin.operators`), mtls-ca rewrites `federation.file`, so, like the EAB key file, put it in a directory
+mtls-ca can write (`/var/lib/mtls-ca/federation.json` with the bundled systemd unit); otherwise mtls-ca refuses to start.
 
 ### 2. Exchange federation records (both organizations)
 
@@ -139,8 +155,13 @@ sudo mtlsctl federation import -config /etc/mtls-ca/config.yaml -in b.json -id b
 The partner approves A the same way (traffic flows **only after both sides approve**).
 `mtlsctl federation list -config ... [-id b-corp]` shows the state and the record of operations.
 
-> In the stage 1 CLI, the `-by` name is self-declared (two-person approval only checks that the names differ).
-> Restrict who can log in to the CA server and review the record of operations (`federation list -id`) regularly.
+**The admin UI's "Federation" page offers the same operations (import, request, approve, suspend, remove, and exporting your own record). It is the recommended way.**
+The admin UI checks the operating admin's name with the certificate used to log in (mTLS), so it guarantees that requester and approver really are different people.
+The fingerprint fields do not accept pasting; type the fingerprint while hearing it read aloud.
+**Approval must use the same channel as the request** (UI requests are approved in the UI, CLI requests in the CLI). The UI and the CLI name admins differently (certificate names vs. self-declared names), and mixing them would let one person pass the two-person approval.
+
+> In the CLI, the `-by` name is self-declared (two-person approval only checks that the names differ). Partners requested or approved via the CLI
+> are marked "includes CLI (self-declared)" in the admin UI. Restrict who can log in to the CA server and review the record of operations (`federation list -id`) regularly.
 
 ### 4. Receive partners with mtls-agent on each server
 
@@ -184,7 +205,29 @@ sudo mtlsctl federation suspend -config /etc/mtls-ca/config.yaml -id b-corp -rea
 One person can suspend immediately. Servers receive it within 1 minute by default, and the PEM in `federation_dir` is replaced with a "PEM that chains to nothing".
 **If traffic between the CA and the servers is blocked, trust may remain until the trust bundle expires (2 days by default) in the worst case.**
 In urgent cases, also remove the partner's names from each application's `AllowedPeers` (the allowlist for nginx).
-Resuming requires the comparison and two-person approval again (step 3). Remove a partner that is no longer needed with `mtlsctl federation remove`.
+Resuming requires the comparison and two-person approval again (step 3). Remove a partner that is no longer needed with `mtlsctl federation remove`. Removing also deletes its record of operations from the file, so save it first with `mtlsctl federation list -config ... -id <id>` (a summary remains in the audit log).
+
+### 7. Follow a partner's root CA rotation
+
+When a partner rotates its root CA, it sends **an announcement signed with its old root key**.
+
+1. Import the announcement (paste it in the partner's details on the admin UI's "Federation" page, or use the CLI). Its signature is verified with the old root you currently trust, so no fingerprint comparison is needed.
+
+   ```sh
+   sudo mtlsctl federation announce -config /etc/mtls-ca/config.yaml -id b-corp -in announce.jws
+   ```
+
+   Announcements that widen the scope, have expired, target a suspended partner, or name your own root CA as the new root are refused.
+   They are also refused while a next root already exists (pending or approved), so it is never silently replaced. To import a different announcement, cancel the existing one first with `mtlsctl federation cancel-next`.
+2. Approve the next root (one person is enough). Once approved, both old and new roots are trusted with the same scope.
+
+   ```sh
+   sudo mtlsctl federation approve-next -config /etc/mtls-ca/config.yaml -id b-corp
+   ```
+
+3. When the partner reports that it now issues under the new root, remove the old root (`mtlsctl federation retire-root`). To abort, use `cancel-next`.
+
+If a partner rotates its root CA because of key compromise, announcements cannot be used. Suspend the federation and redo the first-time procedure (comparison and two-person approval) with the new root CA.
 
 ### Monitoring
 

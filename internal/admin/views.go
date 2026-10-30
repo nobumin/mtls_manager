@@ -110,6 +110,7 @@ func (s *Server) dashboardData(*http.Request) (any, error) {
 	if s.issuer.Root.NotAfter.Sub(now) < 365*24*time.Hour {
 		v.Warnings = append(v.Warnings, "ルート CA の有効期限まで 1 年を切った。ルート CA の入れ替えを計画すること")
 	}
+	v.Warnings = append(v.Warnings, s.federationWarnings(now)...)
 	// 名前の組ごとに最新の有効な証明書を見て、更新が遅れているものを数える。
 	latest := map[string]store.Cert{}
 	for _, c := range certs {

@@ -58,12 +58,17 @@ type BundlePartner struct {
 	RootSHA256 string    `json:"root_sha256"`
 	Domains    []string  `json:"domains"`
 	Expires    time.Time `json:"expires"`
+	// NextRootCert はルート CA の入れ替え中の新しいルート（予告で取り込み、承認したもの）。同じ範囲で信頼する。
+	NextRootCert   string `json:"next_root_cert,omitempty"`
+	NextRootSHA256 string `json:"next_root_sha256,omitempty"`
 }
 
 // TrustedPartner は検証を通った連携先。
 type TrustedPartner struct {
-	ID      string
-	Root    *x509.Certificate
+	ID   string
+	Root *x509.Certificate
+	// Roots は信頼するルート（Root と、入れ替え中なら次のルート）。
+	Roots   []*x509.Certificate
 	Domains []string
 }
 
@@ -237,7 +242,23 @@ func checkPartner(p BundlePartner, o VerifyOptions, accepted [][]string) (Truste
 	if !p.Expires.IsZero() && !o.Now.Before(p.Expires) {
 		return TrustedPartner{}, "連携の有効期限が切れている"
 	}
-	return TrustedPartner{ID: p.ID, Root: root, Domains: scope}, ""
+	roots := []*x509.Certificate{root}
+	if p.NextRootCert != "" {
+		next, err := parseRoot(p.NextRootCert)
+		if err != nil {
+			return TrustedPartner{}, "次のルート: " + err.Error()
+		}
+		if !FingerprintEqual(p.NextRootSHA256, Fingerprint(next)) {
+			return TrustedPartner{}, "次のルートの指紋が証明書と一致しない"
+		}
+		for _, own := range o.OwnRoots {
+			if own.Equal(next) {
+				return TrustedPartner{}, "次のルートが自分のルート CA と同じ"
+			}
+		}
+		roots = append(roots, next)
+	}
+	return TrustedPartner{ID: p.ID, Root: root, Roots: roots, Domains: scope}, ""
 }
 
 // Builder は CA 側でトラストバンドルを作る。連携情報のファイルが変わったとき、
@@ -292,6 +313,9 @@ func NewBuilder(store *Store, inter *x509.Certificate, key crypto.Signer, ownRoo
 // OwnScope は自分の範囲（中間 CA の名前制約）を返す。
 func (b *Builder) OwnScope() []string { return slices.Clone(b.ownScope) }
 
+// OwnRoots は自分のルート CA（CAFile）を返す。
+func (b *Builder) OwnRoots() []*x509.Certificate { return slices.Clone(b.ownRoots) }
+
 // Current は現在のバンドル（JWS）と ETag を返す。必要なら作り直す。
 func (b *Builder) Current(now time.Time) (string, string, error) {
 	f, changed, err := b.store.Snapshot()
@@ -317,6 +341,9 @@ func (b *Builder) Current(now time.Time) (string, string, error) {
 			continue
 		}
 		bp := BundlePartner{ID: p.ID, RootCert: p.RootCert, RootSHA256: p.RootSHA256, Domains: p.Domains, Expires: p.Expires}
+		if p.NextState == NextActive {
+			bp.NextRootCert, bp.NextRootSHA256 = p.NextRootCert, p.NextRootSHA256
+		}
 		if _, reason := checkPartner(bp, VerifyOptions{OwnRoots: b.ownRoots, OwnScope: b.ownScope, Now: now}, accepted); reason != "" {
 			b.log.Warn("連携先をトラストバンドルに入れない", "category", "audit", "partner", p.ID, "reason", reason)
 			continue

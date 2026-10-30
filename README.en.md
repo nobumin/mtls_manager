@@ -27,7 +27,7 @@ you need your own CA. mtls_manager aims to make in-house mTLS as easy to operate
 - **Easy to integrate**: the Go library (`mtls` package) adds hot certificate reloading and a peer-name allowlist in a few lines.
   It also works with existing software such as nginx and curl.
 - **Admin web UI**: view the overview, issued certificates, EAB keys and logs in a browser. Authorized admins can also issue and revoke EAB keys and revoke certificates (without stopping the CA). Login is mTLS with certificates issued by this CA, and every access is audit-logged.
-- **Federation with other organizations**: servers managed by separate mtls-cas (separate root CAs) can also connect with mTLS, each trusting the other's root CA only within the other's scope (domains). Federations are established with fingerprint comparison and two-person approval, and one person can suspend them immediately ([operations guide](docs/en/operations.md#federating-with-another-organization)).
+- **Federation with other organizations**: servers managed by separate mtls-cas (separate root CAs) can also connect with mTLS, each trusting the other's root CA only within the other's scope (domains). Federations are established with fingerprint comparison and two-person approval (the admin UI checks approvers by certificate), and one person can suspend them immediately ([operations guide](docs/en/operations.md#federating-with-another-organization)).
 - **Linux first, macOS supported**: example systemd units and launchd jobs are included.
 
 ## Architecture

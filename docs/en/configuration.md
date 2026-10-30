@@ -56,6 +56,7 @@ The admin UI (`admin.listen`) runs on a separate port and shows the following pa
 | `/` | Overview (CA certificate expiry, counts, warnings) |
 | `/certs` | Issued certificates (operators in `admin.operators` can also revoke) |
 | `/eab` | EAB keys (operators in `admin.operators` can also issue and revoke) |
+| `/federation` | Federation (admins in `admin.operators` can also import, request, approve, suspend and remove). Only when `federation.file` is set |
 | `/logs` | Logs |
 
 It never shows secrets such as keys or HMACs (except the HMAC of a newly issued EAB key, shown once right after issuing). See the [operations design guide](operations-design.md#9-admin-web-ui) for usage.
@@ -125,6 +126,11 @@ mtlsctl federation approve -config CA_CONFIG -id ID [-fingerprint FP]
 mtlsctl federation suspend -config CA_CONFIG -id ID [-reason TEXT]
 mtlsctl federation remove  -config CA_CONFIG -id ID
 mtlsctl federation list    -config CA_CONFIG [-id ID]
+mtlsctl federation announce     -config CA_CONFIG -id ID -in F
+mtlsctl federation approve-next -config CA_CONFIG -id ID
+mtlsctl federation retire-root  -config CA_CONFIG -id ID
+mtlsctl federation cancel-next  -config CA_CONFIG -id ID
+mtlsctl root announce -old-root-cert F -old-root-key F -new-root-cert F -domains D[,D...] -out F [-switch-at YYYY-MM-DD] [-validity 90d]
 mtlsctl inspect FILE
 ```
 
