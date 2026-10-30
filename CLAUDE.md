@@ -58,5 +58,6 @@
 | `docs/*/configuration.md` | 設定項目（`examples/*.example.yaml` とも合わせる） |
 | `docs/*/operations.md` | 運用手順 |
 | `docs/*/operations-design.md` | 運用設計（ネットワーク、自動化の範囲、管理画面、監視、障害・事故への対応） |
+| `docs/*/test-procedure.md` | 動作テスト手順書（1 台の Linux での環境の準備とテスト）。コマンド・出力・設定項目を変えたら合わせる |
 | `docs/*/security.md` | セキュリティ設計（守れること・守れないこと） |
 | `docs/*/federation-design.md` | 連携版の設計（別々の mtls-manager の間の信頼）。実装に合わせて更新する |

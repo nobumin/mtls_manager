@@ -44,7 +44,7 @@ What mtls_manager protects against, and what it does not. Please read this befor
 | --- | --- |
 | Compromise of the CA server | The intermediate key can issue any certificate within the name constraints. Dedicate the CA server, restrict logins, keep the OS patched |
 | Compromise of a server holding a certificate | Its key can impersonate that server. Revoke its EAB key and, if needed, its certificate |
-| Immediate revocation | In v0.x the library and mtls-agent do not check the CRL; short lifetimes bound the exposure ([operations guide](operations.md#revoking-a-certificate)) |
+| Immediate revocation | In v0.x the library and mtls-agent do not check the CRL, and nginx's `ssl_crl` cannot be used with this CA's CRL alone (there is no root CA CRL; a command to create one is future work); short lifetimes bound the exposure ([operations guide](operations.md#revoking-a-certificate)) |
 | Key protection (HSM / KMS) | In v0.x keys are PEM files. Encrypt the CA server's disk. HSM / KMS support is planned |
 | Delivery of EAB keys / HMACs | Use a secure channel (e.g. scp) and delete them from the server after the first registration |
 | Storage of the root key | The file is not encrypted; store it on encrypted media |

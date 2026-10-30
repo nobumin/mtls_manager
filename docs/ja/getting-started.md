@@ -289,3 +289,4 @@ curl --cacert /etc/mtls-agent/tls/ca.pem \
 
 - [運用ガイド](operations.md): サーバの追加・取り消し、失効、中間 CA の更新、バックアップ、監視
 - [セキュリティ設計](security.md): 何を守れて、何を守れないか
+- [動作テスト手順書](test-procedure.md): 1 台の Linux で導入からテストまでを通しで行う
