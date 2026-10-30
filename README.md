@@ -84,11 +84,12 @@ GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -o dist/ ./cmd/...
 | 文書 | 内容 |
 | --- | --- |
 | [導入手順](docs/ja/getting-started.md) | CA の構築から、アプリへの組み込みまで |
+| [動作テスト手順書](docs/ja/test-procedure.md) | 1 台の Linux で、テスト環境の準備から動作テスト（CA・mtls-agent・アプリへの組み込み・失効）までを通しで行う手順 |
 | [設定リファレンス](docs/ja/configuration.md) | `mtls-ca`・`mtls-agent` の設定項目 |
 | [運用ガイド](docs/ja/operations.md) | サーバの追加・取り消し、失効、中間 CA の更新、バックアップ、監視、トラブル対応 |
 | [運用設計ガイド（詳細版）](docs/ja/operations-design.md) | ネットワーク設計、自動化の範囲、管理画面、監視、障害・事故への対応、バックアップ、導入前のチェックリスト |
 | [セキュリティ設計](docs/ja/security.md) | 想定する脅威、守れること・守れないこと、推奨事項 |
-| [連携版の設計](docs/ja/federation-design.md) | 別々の mtls-manager で管理するサーバ間の mTLS（ルート CA の範囲付きの相互信頼）。段階 1 を実装済み |
+| [連携版の設計](docs/ja/federation-design.md) | 別々の mtls-manager で管理するサーバ間の mTLS（ルート CA の範囲付きの相互信頼）。段階 1・2 と、段階 3 のうちルート CA の入れ替えの予告を実装済み |
 | [SECURITY.md](SECURITY.md) | 脆弱性の報告方法 |
 
 ## 秘密情報の扱い

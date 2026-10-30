@@ -290,3 +290,4 @@ curl --cacert /etc/mtls-agent/tls/ca.pem \
 
 - [Operations guide](operations.md): adding/removing servers, revocation, intermediate rotation, backup, monitoring
 - [Security design](security.md): what is and is not protected
+- [Test procedure](test-procedure.md): installation and testing end to end on one Linux machine

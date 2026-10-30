@@ -84,11 +84,12 @@ Follow the [getting started guide](docs/en/getting-started.md):
 | Document | Contents |
 | --- | --- |
 | [Getting started](docs/en/getting-started.md) | From building the CA to integrating applications |
+| [Test procedure](docs/en/test-procedure.md) | Setting up a test environment on one Linux machine and testing the CA, mtls-agent, application integration and revocation end to end |
 | [Configuration reference](docs/en/configuration.md) | Settings for `mtls-ca` and `mtls-agent` |
 | [Operations guide](docs/en/operations.md) | Adding/removing servers, revocation, intermediate rotation, backup, monitoring, troubleshooting |
 | [Operations design guide (detailed)](docs/en/operations-design.md) | Network design, what is automated, admin UI, monitoring, failure and incident response, backup, pre-deployment checklist |
 | [Security design](docs/en/security.md) | Threat model, what is and is not protected, recommendations |
-| [Federation design](docs/en/federation-design.md) | mTLS between servers managed by separate mtls-managers (scoped mutual trust of root CAs). Stage 1 implemented |
+| [Federation design](docs/en/federation-design.md) | mTLS between servers managed by separate mtls-managers (scoped mutual trust of root CAs). Stages 1 and 2, plus root CA rotation announcements from stage 3, implemented |
 | [SECURITY.md](SECURITY.md) | How to report vulnerabilities |
 
 ## Handling of secrets
