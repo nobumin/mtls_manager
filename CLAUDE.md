@@ -46,6 +46,7 @@
 - 変更したら `go test -race ./...`、`go vet ./...`、`gofmt -l .` を通す。
 - ACME のふるまいを変えたら、lego との相互接続試験（`go test -tags interop ./test/interop/`）も確かめる。
 - CI（`.github/workflows/ci.yml`）: 書式、staticcheck、Linux / macOS のテスト、lego との相互接続、クロスビルド、govulncheck、gitleaks。
+  PR（develop / main 向けの作成・更新）のときだけ動く。新しい脆弱性は `.github/workflows/weekly.yml` で週 1 回確かめる。
 
 ## 7. ドキュメント維持
 

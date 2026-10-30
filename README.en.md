@@ -112,6 +112,8 @@ LEGO_BIN=$(which lego) go test -tags interop ./test/interop/  # interop test wit
 
 CI (`.github/workflows/ci.yml`) runs formatting checks, static analysis (staticcheck), tests on Linux and macOS,
 the lego interop test, cross builds for each OS/CPU, govulncheck and gitleaks.
+CI runs only for pull requests to develop / main (when opened or updated), not on the push after a merge.
+Because new vulnerabilities can be published even when the code has not changed, `.github/workflows/weekly.yml` checks develop and main with govulncheck once a week.
 
 ## License
 
