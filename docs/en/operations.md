@@ -43,8 +43,11 @@ From the "Issued certificates" page of the admin UI (`admin.operators`), you can
 Entries that `certs` shows as `未完了` (incomplete) are serials recorded before signing whose issuance did not complete
 (e.g. the CA stopped or the disk failed). They were never returned to a client, so exposure is unlikely, but you can revoke them to be safe.
 
-> **Note**: in v0.x neither the `mtls` library nor `mtls-agent` checks the CRL. Revocation only affects software configured to
-> read the CRL (e.g. nginx `ssl_crl`). mtls_manager is designed around **short lifetimes** (24 hours by default) instead of revocation.
+> **Note**: in v0.x neither the `mtls` library nor `mtls-agent` checks the CRL. Revocation only affects software configured to read the CRL.
+> However, **nginx's `ssl_crl` cannot be used with this CA's CRL alone**: nginx requires CRLs for every level of the chain (including the root CA level
+> that issued the intermediate), and there is no root CA CRL, so every connection is refused, including certificates that are not revoked
+> (error.log: `unable to get certificate CRL`). Check whether a certificate is revoked with `openssl verify -crl_check` ([test procedure 5.](test-procedure.md#5-revocation-and-eab-key-revocation)).
+> mtls_manager is designed around **short lifetimes** (24 hours by default) instead of revocation.
 > In urgent cases, also consider removing the peer from the applications' allowlists (`AllowedPeers`).
 
 A server can also revoke its own certificate with an ACME revocation request (e.g. `lego revoke`).
