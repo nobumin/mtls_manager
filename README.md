@@ -113,6 +113,8 @@ LEGO_BIN=$(which lego) go test -tags interop ./test/interop/  # lego との相�
 
 CI（`.github/workflows/ci.yml`）では、書式、静的解析（staticcheck）、Linux / macOS でのテスト、lego との相互接続試験、
 各 OS・CPU 向けのビルド、govulncheck、gitleaks を実行します。
+CI は develop / main 向けの PR（作成・更新）のときだけ動き、マージ後の push では動きません。
+コードを変えていなくても新しい脆弱性が公表されることがあるので、`.github/workflows/weekly.yml` で develop と main を週 1 回 govulncheck で確かめます。
 
 ## ライセンス
 

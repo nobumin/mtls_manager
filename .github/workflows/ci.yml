@@ -1,10 +1,13 @@
 name: CI
 
+# develop / main 向けの PR（作成・更新）のときだけ実行する。マージ後の push では実行しない
+# （PR と同じ内容を 2 回試すことになるため。複数の PR を続けてマージしたときの組み合わせは、
+# ブランチ保護の「マージ前にブランチを最新にする」で PR の時点で確かめる）。
+# 新しく公表された脆弱性は weekly.yml で週 1 回確かめる。
 on:
-  push:
-    branches: [main, develop]
   pull_request:
     branches: [main, develop]
+  workflow_dispatch:
 
 permissions:
   contents: read
