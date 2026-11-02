@@ -236,6 +236,10 @@ func TestAdminPagesForAllowedAdmin(t *testing.T) {
 		if csp := res.Header.Get("Content-Security-Policy"); !strings.Contains(csp, "script-src 'self'") {
 			t.Errorf("%s: CSP が無い: %q", path, csp)
 		}
+		// no-referrer だと、Chrome・Edge は同じ画面からのフォームの送信に Origin: null を付け、変更の操作が CSRF の確認で拒否される。
+		if rp := res.Header.Get("Referrer-Policy"); rp != "same-origin" {
+			t.Errorf("%s: Referrer-Policy = %q（same-origin のはず）", path, rp)
+		}
 	}
 	// EAB の HMAC 鍵（秘密情報）は表示しない。
 	if _, body := get(t, c, base+"/eab"); strings.Contains(body, e.eabHMAC) {
