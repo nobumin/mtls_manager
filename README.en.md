@@ -71,6 +71,8 @@ GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -o dist/ ./cmd/...
 
 ## Getting started
 
+**Try it first**: with nothing but Docker, experience mTLS between a CA and two servers (a Go application and nginx) in about 10 minutes ([playground](docs/playground/README.en.md)).
+
 Follow the [getting started guide](docs/en/getting-started.md):
 
 1. Create the root CA on an offline machine
@@ -84,6 +86,7 @@ Follow the [getting started guide](docs/en/getting-started.md):
 | Document | Contents |
 | --- | --- |
 | [Getting started](docs/en/getting-started.md) | From building the CA to integrating applications |
+| [Playground](docs/playground/README.en.md) | With nothing but Docker, try the CA, mTLS between two servers (a Go application and nginx) and the admin UI, from start to removal |
 | [Test procedure](docs/en/test-procedure.md) | Setting up a test environment on one Linux machine and testing the CA, mtls-agent, application integration and revocation end to end |
 | [Configuration reference](docs/en/configuration.md) | Settings for `mtls-ca` and `mtls-agent` |
 | [Operations guide](docs/en/operations.md) | Adding/removing servers, revocation, intermediate rotation, backup, monitoring, troubleshooting |

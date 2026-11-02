@@ -71,6 +71,8 @@ GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -o dist/ ./cmd/...
 
 ## はじめかた
 
+**まず試す**: Docker だけで、CA と 2 台のサーバ（Go のアプリ・nginx）の間の mTLS を 10 分ほどで体験できます（[playground](docs/playground/README.md)）。
+
 [導入手順](docs/ja/getting-started.md) に沿って、次の順に進めます。
 
 1. オフラインの端末でルート CA を作る
@@ -84,6 +86,7 @@ GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -o dist/ ./cmd/...
 | 文書 | 内容 |
 | --- | --- |
 | [導入手順](docs/ja/getting-started.md) | CA の構築から、アプリへの組み込みまで |
+| [playground（体験用の環境）](docs/playground/README.md) | Docker だけで、CA・2 台のサーバ（Go のアプリ・nginx）の間の mTLS・管理画面を、起動から削除まで試す |
 | [動作テスト手順書](docs/ja/test-procedure.md) | 1 台の Linux で、テスト環境の準備から動作テスト（CA・mtls-agent・アプリへの組み込み・失効）までを通しで行う手順 |
 | [設定リファレンス](docs/ja/configuration.md) | `mtls-ca`・`mtls-agent` の設定項目 |
 | [運用ガイド](docs/ja/operations.md) | サーバの追加・取り消し、失効、中間 CA の更新、バックアップ、監視、トラブル対応 |

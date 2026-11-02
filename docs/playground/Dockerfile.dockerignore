@@ -1,0 +1,7 @@
+# ビルドに要らないものを context から外す（Dockerfile と同じ場所の <Dockerfile>.dockerignore は BuildKit が使う）
+.git
+docs/playground/out
+**/*.key
+**/*.pem
+**/*.p12
+**/*.hmac
