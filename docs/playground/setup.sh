@@ -45,14 +45,16 @@ m mtlsctl intermediate sign -root-cert /var/lib/mtls-ca/offline/root.crt -root-k
 m cp /var/lib/mtls-ca/offline/root.crt /etc/mtls-ca/root.crt
 
 step "2/5 EAB 鍵を発行する（サーバごとに、取得できる名前を 1 つに限る）"
-declare -A KID
+# kid はサーバごとの変数（KID_server_a など）に持つ。macOS の標準の bash 3.2 には連想配列（declare -A）が無いため。
+set_kid() { printf -v "KID_${1//-/_}" '%s' "$2"; }
+kid_of() { local v="KID_${1//-/_}"; printf '%s' "${!v}"; }
 for name in server-a server-b admin; do
   fqdn=$name.$DOMAIN
   [ "$name" = admin ] && fqdn=$ADMIN
   out=$(m mtlsctl eab create -file /etc/mtls-ca/eab.json -names "$fqdn" -note "$name（playground）" -hmac-out "/etc/mtls-ca/$name.hmac")
-  KID[$name]=$(printf '%s\n' "$out" | awk '$1 == "kid:" {print $2}')
-  [ -n "${KID[$name]}" ] || fail "EAB 鍵の kid を読み取れない: $out"
-  echo "  $fqdn: kid=${KID[$name]}"
+  set_kid "$name" "$(printf '%s\n' "$out" | awk '$1 == "kid:" {print $2}')"
+  [ -n "$(kid_of "$name")" ] || fail "EAB 鍵の kid を読み取れない: $out"
+  echo "  $fqdn: kid=$(kid_of "$name")"
 done
 
 step "3/5 CA を起動する（ACME: https://$CA_HOST:8443、管理画面: https://$CA_HOST:9443）"
@@ -83,7 +85,7 @@ ca_url: "https://$CA_HOST:8443/acme/directory"
 ca_root: "$3/root.crt"
 account_key: "$4"
 eab:
-  kid: "${KID[$1]}"
+  kid: "$(kid_of "$1")"
   hmac_file: "$3/eab.hmac"
 names: ["$2"]
 challenge:
@@ -121,15 +123,8 @@ m mkdir -p /etc/mtls-agent-admin/tls
 m cp /etc/mtls-ca/root.crt /etc/mtls-agent-admin/root.crt
 m cp /etc/mtls-ca/admin.hmac /etc/mtls-agent-admin/eab.hmac
 agent_config admin "$ADMIN" /etc/mtls-agent-admin /etc/mtls-agent-admin/account.key '[]' | put mtls-manager /etc/mtls-agent-admin/config.yaml 0644
-m mtls-agent renew -config /etc/mtls-agent-admin/config.yaml
-m openssl pkcs12 -export -in /etc/mtls-agent-admin/tls/fullchain.pem -inkey /etc/mtls-agent-admin/tls/key.pem \
-  -name "mtls playground admin" -out /out/admin.p12 -passout "pass:$P12_PASS" \
-  -keypbe PBE-SHA1-3DES -certpbe PBE-SHA1-3DES -macalg sha1
-m cp /etc/mtls-ca/root.crt /out/root.crt
-m cp /etc/mtls-agent-admin/tls/fullchain.pem /out/admin.crt
-m cp /etc/mtls-agent-admin/tls/key.pem /out/admin.key
-# 書き出したファイルを、PC の利用者が読めるようにする（Linux では bind mount の所有者がそのまま見える）
-m chown "$(id -u):$(id -g)" /out/admin.p12 /out/root.crt /out/admin.crt /out/admin.key
+# 取得と out/ への書き出しは renew-admin.sh と同じ（24 時間で切れた後の取り直しにも使う）
+./renew-admin.sh --quiet
 m rm -f /etc/mtls-ca/server-a.hmac /etc/mtls-ca/server-b.hmac /etc/mtls-ca/admin.hmac
 
 cat <<EOF

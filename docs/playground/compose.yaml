@@ -3,6 +3,7 @@
 #   server-a     … Go のアプリ（mTLS。8443 番）
 #   server-b     … nginx（mTLS。8443 番）
 # PC から見えるのは管理画面だけ。server-a / server-b の 8443 番は公開しない。
+# どのコンテナも、止まったら起こし直す（restart）。init は、止まった子プロセス（mtls-agent など）を回収する。
 name: mtls-playground
 
 x-build: &build
@@ -12,6 +13,8 @@ x-build: &build
 services:
   mtls-manager:
     build: { <<: *build, target: manager }
+    restart: unless-stopped
+    init: true
     hostname: ca
     networks:
       private:
@@ -30,6 +33,8 @@ services:
 
   server-a:
     build: { <<: *build, target: server-a }
+    restart: unless-stopped
+    init: true
     hostname: server-a
     networks:
       private:
@@ -40,6 +45,8 @@ services:
 
   server-b:
     build: { <<: *build, target: server-b }
+    restart: unless-stopped
+    init: true
     hostname: server-b
     networks:
       private:

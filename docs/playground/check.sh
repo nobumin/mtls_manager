@@ -24,7 +24,10 @@ check() {
   case $expect in
     ok)     [ $rc -eq 0 ] && [ "$code" = 200 ] && printf '%s' "$out" | grep -qF "$want" && ok=true ;;
     code:*) [ "$code" = "${expect#code:}" ] && ok=true ;;
-    reject) [ $rc -ne 0 ] && ok=true ;;
+    # TLS で拒否されたときの curl の終了コードだけを合格にする。35: 握手の失敗、55・56: 握手の後に切られた
+    # （TLS 1.3 では、サーバはクライアント証明書を握手の後で拒否するので、送信中・受信中に切られる）。
+    # 名前が引けない（6）・つながらない（7）などは、拒否を確かめたことにならないので不合格。
+    reject) case $rc in 35|55|56) ok=true ;; esac ;;
   esac
   if $ok; then
     pass=$((pass + 1)); printf '\033[32m[PASS]\033[0m %s\n' "$title"

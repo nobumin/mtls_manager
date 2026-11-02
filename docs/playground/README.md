@@ -224,6 +224,18 @@ docker compose exec server-b mtls-agent check -config /etc/mtls-agent/config.yam
 
 シリアルが変わり、管理画面の「発行済み証明書」にも新しい証明書が並びます。server-a（Go のアプリ）は、再起動しなくても新しい証明書を使います（`mtls` ライブラリが 30 秒ごとにファイルを確かめる）。
 
+### 管理者の証明書の取り直し（24 時間で切れる）
+
+server-a・server-b の証明書は常駐の mtls-agent が自動で更新しますが、**管理者の証明書（`out/admin.p12`）は自動では更新しません**。
+有効期間は 24 時間なので、翌日に続きを試すと管理画面に入れません。そのときは、取り直して `out/` に書き出し直します。
+
+```bash
+./renew-admin.sh
+```
+
+ブラウザ・OS から古い管理者の証明書（`admin.admins.playground.internal`）を消し、新しい `out/admin.p12` を読み込み直します（[4-2](#4-2-管理者の証明書とルート-ca-をブラウザに読み込む)）。
+ルート CA は変わらないので、`out/root.crt` の読み込み直しは要りません。
+
 ### 再起動しても続くこと
 
 ```bash
@@ -271,6 +283,7 @@ rm -f out/admin.p12 out/admin.crt out/admin.key out/root.crt
 | `./setup.sh` が `… を待ったが、… 秒たっても終わらない` で止まる | `docker compose logs mtls-manager server-a server-b` でエラーを確かめる |
 | `docker compose up` が `port is already allocated` で失敗する | PC の 9443 番を使っているものを止めるか、`compose.yaml` の `127.0.0.1:9443:9443` の左側を別の番号にする（ブラウザで開く番号も変わる） |
 | ブラウザで開くと証明書の選択が出ない・`ERR_BAD_SSL_CLIENT_AUTH_CERT` | `out/admin.p12` を読み込んだか確かめ、ブラウザを再起動する |
+| 昨日は開けた管理画面に、今日は入れない（証明書のエラー） | 管理者の証明書は 24 時間で切れる。`./renew-admin.sh` を実行し、新しい `out/admin.p12` を読み込み直す（[5.](#管理者の証明書の取り直し24-時間で切れる)） |
 | ブラウザで `ca.playground.internal` が見つからない | 4-1 の hosts を確かめる |
 | 環境を作り直した後、管理画面に入れない（証明書のエラー） | 作り直すとルート CA も新しくなる。ブラウザ・OS から古い管理者の証明書とルート CA を消し、新しい `out/admin.p12` と `out/root.crt` を読み込み直す |
-| `./setup.sh` が `Permission denied` | `chmod +x setup.sh check.sh` を実行する |
+| `./setup.sh` が `Permission denied` | `chmod +x setup.sh check.sh renew-admin.sh` を実行する |

@@ -229,6 +229,20 @@ docker compose exec server-b mtls-agent check -config /etc/mtls-agent/config.yam
 The serial changes, and the new certificate also appears under "Issued certificates" in the admin UI. server-a (the Go application) uses its new
 certificate without a restart (the `mtls` library checks the files every 30 seconds).
 
+### Renewing the administrator's certificate (it expires in 24 hours)
+
+The resident mtls-agent renews the certificates of server-a and server-b automatically, but **the administrator's certificate (`out/admin.p12`) is
+not renewed automatically**. It is valid for 24 hours, so if you come back the next day you cannot get into the admin UI. Obtain it again and
+re-export it to `out/`:
+
+```bash
+./renew-admin.sh
+```
+
+Remove the old administrator's certificate (`admin.admins.playground.internal`) from your browser / OS and import the new `out/admin.p12`
+([4-2](#4-2-import-the-administrators-certificate-and-the-root-ca-into-your-browser)). The root CA does not change, so there is no need to import
+`out/root.crt` again.
+
 ### It survives restarts
 
 ```bash
@@ -276,6 +290,7 @@ To try again, start over from [1. Start](#1-start).
 | `./setup.sh` stops with `… を待ったが、… 秒たっても終わらない` (gave up waiting for …) | Look for errors with `docker compose logs mtls-manager server-a server-b` |
 | `docker compose up` fails with `port is already allocated` | Stop whatever uses port 9443 on your PC, or change the left side of `127.0.0.1:9443:9443` in `compose.yaml` (the port you open in the browser changes too) |
 | The browser does not offer a certificate, or shows `ERR_BAD_SSL_CLIENT_AUTH_CERT` | Check that you imported `out/admin.p12`, and restart the browser |
+| You could open the admin UI yesterday but not today (certificate error) | The administrator's certificate expires in 24 hours. Run `./renew-admin.sh` and import the new `out/admin.p12` ([5.](#renewing-the-administrators-certificate-it-expires-in-24-hours)) |
 | The browser cannot find `ca.playground.internal` | Check the hosts entry from 4-1 |
 | After rebuilding the environment you cannot get into the admin UI (certificate error) | Rebuilding creates a new root CA. Remove the old administrator's certificate and root CA from your browser / OS, and import the new `out/admin.p12` and `out/root.crt` |
-| `./setup.sh` fails with `Permission denied` | Run `chmod +x setup.sh check.sh` |
+| `./setup.sh` fails with `Permission denied` | Run `chmod +x setup.sh check.sh renew-admin.sh` |
