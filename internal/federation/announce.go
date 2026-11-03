@@ -10,6 +10,7 @@ import (
 
 	jose "github.com/go-jose/go-jose/v4"
 
+	"github.com/nobumin/mtls_manager/internal/i18n"
 	"github.com/nobumin/mtls_manager/internal/pki"
 )
 
@@ -49,17 +50,17 @@ type Announcement struct {
 // NewAnnouncement は予告を作る（未署名）。
 func NewAnnouncement(oldRoot, newRoot *x509.Certificate, domains []string, switchAt time.Time, validity time.Duration, now time.Time) (*Announcement, error) {
 	if err := CheckRoot(newRoot); err != nil {
-		return nil, fmt.Errorf("新しいルート CA: %w", err)
+		return nil, fmt.Errorf(i18n.T("新しいルート CA: %w", "new root CA: %w"), err)
 	}
 	if oldRoot.Equal(newRoot) {
-		return nil, errors.New("新しいルート CA が古いものと同じ")
+		return nil, errors.New(i18n.T("新しいルート CA が古いものと同じ", "the new root CA is the same as the old one"))
 	}
 	ds, err := NormalizeScope(domains)
 	if err != nil {
 		return nil, err
 	}
 	if validity <= 0 || validity > MaxAnnouncementValidity {
-		return nil, fmt.Errorf("予告の有効期限は %s まで", MaxAnnouncementValidity)
+		return nil, fmt.Errorf(i18n.T("予告の有効期限は %s まで", "the announcement expiry must be at most %s"), MaxAnnouncementValidity)
 	}
 	now = now.UTC().Truncate(time.Second)
 	return &Announcement{
@@ -72,7 +73,7 @@ func NewAnnouncement(oldRoot, newRoot *x509.Certificate, domains []string, switc
 // SignAnnouncement は予告に古いルート CA の鍵で署名する。
 func SignAnnouncement(a *Announcement, oldRoot *x509.Certificate, oldRootKey crypto.Signer) (string, error) {
 	if !pki.PublicKeyEqual(oldRoot.PublicKey, oldRootKey.Public()) {
-		return "", errors.New("古いルート CA の証明書と鍵が対応していない")
+		return "", errors.New(i18n.T("古いルート CA の証明書と鍵が対応していない", "the old root CA certificate and key do not match"))
 	}
 	alg, err := algFor(oldRootKey)
 	if err != nil {
@@ -97,37 +98,37 @@ func SignAnnouncement(a *Announcement, oldRoot *x509.Certificate, oldRootKey cry
 func VerifyAnnouncement(compact string, oldRoot *x509.Certificate, now time.Time) (*Announcement, *x509.Certificate, error) {
 	jws, err := jose.ParseSigned(compact, signingAlgs)
 	if err != nil {
-		return nil, nil, fmt.Errorf("予告を解釈できない: %w", err)
+		return nil, nil, fmt.Errorf(i18n.T("予告を解釈できない: %w", "cannot parse the announcement: %w"), err)
 	}
 	payload, err := jws.Verify(oldRoot.PublicKey)
 	if err != nil {
-		return nil, nil, errors.New("予告の署名を、いま信頼しているルート CA で確かめられない")
+		return nil, nil, errors.New(i18n.T("予告の署名を、いま信頼しているルート CA で確かめられない", "cannot verify the announcement signature with the currently trusted root CA"))
 	}
 	var a Announcement
 	if err := json.Unmarshal(payload, &a); err != nil {
-		return nil, nil, fmt.Errorf("予告を解釈できない: %w", err)
+		return nil, nil, fmt.Errorf(i18n.T("予告を解釈できない: %w", "cannot parse the announcement: %w"), err)
 	}
 	if a.Format != AnnouncementFormat {
-		return nil, nil, fmt.Errorf("予告の形式 %q に対応していない", a.Format)
+		return nil, nil, fmt.Errorf(i18n.T("予告の形式 %q に対応していない", "unsupported announcement format %q"), a.Format)
 	}
 	if !FingerprintEqual(a.OldRootSHA256, Fingerprint(oldRoot)) {
-		return nil, nil, errors.New("予告の古いルート CA の指紋が、いま信頼しているものと違う")
+		return nil, nil, errors.New(i18n.T("予告の古いルート CA の指紋が、いま信頼しているものと違う", "the announcement's old root CA fingerprint differs from the currently trusted one"))
 	}
 	if a.CreatedAt.IsZero() || !a.Expires.After(a.CreatedAt) || a.Expires.Sub(a.CreatedAt) > MaxAnnouncementValidity {
-		return nil, nil, errors.New("予告の作成日時・有効期限が不正")
+		return nil, nil, errors.New(i18n.T("予告の作成日時・有効期限が不正", "invalid announcement creation time or expiry"))
 	}
 	if !now.Before(a.Expires) {
-		return nil, nil, errors.New("予告の有効期限が切れている（古い予告の再送は受け付けない）")
+		return nil, nil, errors.New(i18n.T("予告の有効期限が切れている（古い予告の再送は受け付けない）", "the announcement has expired (replayed old announcements are not accepted)"))
 	}
 	newRoot, err := parseRoot(a.NewRootCert)
 	if err != nil {
-		return nil, nil, fmt.Errorf("新しいルート CA: %w", err)
+		return nil, nil, fmt.Errorf(i18n.T("新しいルート CA: %w", "new root CA: %w"), err)
 	}
 	if !FingerprintEqual(a.NewRootSHA256, Fingerprint(newRoot)) {
-		return nil, nil, errors.New("新しいルート CA の指紋が証明書と一致しない")
+		return nil, nil, errors.New(i18n.T("新しいルート CA の指紋が証明書と一致しない", "the new root CA fingerprint does not match the certificate"))
 	}
 	if newRoot.Equal(oldRoot) {
-		return nil, nil, errors.New("新しいルート CA が古いものと同じ")
+		return nil, nil, errors.New(i18n.T("新しいルート CA が古いものと同じ", "the new root CA is the same as the old one"))
 	}
 	if a.Domains, err = NormalizeScope(a.Domains); err != nil {
 		return nil, nil, err
@@ -141,17 +142,17 @@ func VerifyAnnouncement(compact string, oldRoot *x509.Certificate, now time.Time
 // 次のルートがすでにある（承認待ち・承認済み）ときも拒否する（黙って置き換えない。先に取り消す）。
 func (f *File) ImportAnnouncement(id, compact string, ownRoots []*x509.Certificate, by Actor, now time.Time) error {
 	if len(ownRoots) == 0 {
-		return errors.New("自分のルート CA が無い")
+		return errors.New(i18n.T("自分のルート CA が無い", "own root CA is missing"))
 	}
 	p := f.Find(id)
 	if p == nil {
-		return fmt.Errorf("連携先 %q が無い", id)
+		return fmt.Errorf(i18n.T("連携先 %q が無い", "no partner %q"), id)
 	}
 	if p.State != StateActive {
-		return fmt.Errorf("連携先 %q は %s の状態（予告は有効な連携先にだけ使える。停止中なら初回と同じ連携をやり直す）", id, p.State)
+		return fmt.Errorf(i18n.T("連携先 %q は %s の状態（予告は有効な連携先にだけ使える。停止中なら初回と同じ連携をやり直す）", "partner %q is in state %s (announcements apply only to active partners; if suspended, redo the first federation)"), id, p.State)
 	}
 	if p.NextState != "" {
-		return fmt.Errorf("連携先 %q には次のルート（%s の状態）がすでにある（別の予告を取り込むなら、先に次のルートを取り消す（cancel-next））", id, p.NextState)
+		return fmt.Errorf(i18n.T("連携先 %q には次のルート（%s の状態）がすでにある（別の予告を取り込むなら、先に次のルートを取り消す（cancel-next））", "partner %q already has a next root (state %s) (to import another announcement, cancel the next root first with cancel-next)"), id, p.NextState)
 	}
 	oldRoot, err := p.Root()
 	if err != nil {
@@ -163,21 +164,21 @@ func (f *File) ImportAnnouncement(id, compact string, ownRoots []*x509.Certifica
 	}
 	for _, own := range ownRoots {
 		if own.Equal(newRoot) {
-			return errors.New("新しいルート CA が、自分のルート CA と同じ")
+			return errors.New(i18n.T("新しいルート CA が、自分のルート CA と同じ", "the new root CA is the same as your own root CA"))
 		}
 	}
 	// 予告で範囲は広げられない（相手の申告の範囲を超えない）。承認している範囲は変えない。
 	if !WithinScope(a.Domains, p.DeclaredDomains) {
-		return fmt.Errorf("予告の範囲 %v が、これまでの範囲 %v を超える（範囲を広げるなら、初回と同じ照合と 2 人の承認を行う）", a.Domains, p.DeclaredDomains)
+		return fmt.Errorf(i18n.T("予告の範囲 %v が、これまでの範囲 %v を超える（範囲を広げるなら、初回と同じ照合と 2 人の承認を行う）", "announcement scope %v exceeds the current scope %v (to widen the scope, redo the comparison and two-person approval as for the first federation)"), a.Domains, p.DeclaredDomains)
 	}
 	for _, q := range f.Partners {
 		if FingerprintEqual(q.RootSHA256, a.NewRootSHA256) || FingerprintEqual(q.NextRootSHA256, a.NewRootSHA256) {
-			return fmt.Errorf("新しいルート CA は、すでに連携先 %q のルートとしてある", q.ID)
+			return fmt.Errorf(i18n.T("新しいルート CA は、すでに連携先 %q のルートとしてある", "the new root CA already exists as a root of partner %q"), q.ID)
 		}
 	}
 	p.NextRootCert, p.NextRootSHA256, p.NextState = string(pki.EncodeCertsPEM(newRoot)), a.NewRootSHA256, NextPending
 	p.NextSwitchAt, p.NextExpires = a.SwitchAt, a.Expires
-	p.record("announce", by, "次のルート "+a.NewRootSHA256, now)
+	p.record("announce", by, i18n.T("次のルート ", "next root ")+a.NewRootSHA256, now)
 	return nil
 }
 
@@ -186,16 +187,16 @@ func (f *File) ImportAnnouncement(id, compact string, ownRoots []*x509.Certifica
 func (f *File) ApproveNext(id string, by Actor, now time.Time) error {
 	p := f.Find(id)
 	if p == nil {
-		return fmt.Errorf("連携先 %q が無い", id)
+		return fmt.Errorf(i18n.T("連携先 %q が無い", "no partner %q"), id)
 	}
 	if p.NextState != NextPending {
-		return fmt.Errorf("連携先 %q に承認待ちの次のルートが無い", id)
+		return fmt.Errorf(i18n.T("連携先 %q に承認待ちの次のルートが無い", "partner %q has no next root pending approval"), id)
 	}
 	if !now.Before(p.NextExpires) {
-		return errors.New("予告の有効期限が切れている（予告を取り込み直す）")
+		return errors.New(i18n.T("予告の有効期限が切れている（予告を取り込み直す）", "the announcement has expired (import it again)"))
 	}
 	p.NextState = NextActive
-	p.record("approve-next", by, "次のルート "+p.NextRootSHA256, now)
+	p.record("approve-next", by, i18n.T("次のルート ", "next root ")+p.NextRootSHA256, now)
 	return nil
 }
 
@@ -204,15 +205,15 @@ func (f *File) ApproveNext(id string, by Actor, now time.Time) error {
 func (f *File) RetireRoot(id string, by Actor, now time.Time) error {
 	p := f.Find(id)
 	if p == nil {
-		return fmt.Errorf("連携先 %q が無い", id)
+		return fmt.Errorf(i18n.T("連携先 %q が無い", "no partner %q"), id)
 	}
 	if p.NextState != NextActive {
-		return fmt.Errorf("連携先 %q に承認済みの次のルートが無い", id)
+		return fmt.Errorf(i18n.T("連携先 %q に承認済みの次のルートが無い", "partner %q has no approved next root"), id)
 	}
 	old := p.RootSHA256
 	p.RootCert, p.RootSHA256 = p.NextRootCert, p.NextRootSHA256
 	p.clearNext()
-	p.record("retire-root", by, "古いルート "+old+" を外した", now)
+	p.record("retire-root", by, i18n.T("古いルート ", "old root ")+old+i18n.T(" を外した", " removed"), now)
 	return nil
 }
 
@@ -220,14 +221,14 @@ func (f *File) RetireRoot(id string, by Actor, now time.Time) error {
 func (f *File) CancelNext(id string, by Actor, now time.Time) error {
 	p := f.Find(id)
 	if p == nil {
-		return fmt.Errorf("連携先 %q が無い", id)
+		return fmt.Errorf(i18n.T("連携先 %q が無い", "no partner %q"), id)
 	}
 	if p.NextState == "" {
-		return fmt.Errorf("連携先 %q に次のルートが無い", id)
+		return fmt.Errorf(i18n.T("連携先 %q に次のルートが無い", "partner %q has no next root"), id)
 	}
 	fp := p.NextRootSHA256
 	p.clearNext()
-	p.record("cancel-next", by, "次のルート "+fp+" を取り消した", now)
+	p.record("cancel-next", by, i18n.T("次のルート ", "next root ")+fp+i18n.T(" を取り消した", " cancelled"), now)
 	return nil
 }
 

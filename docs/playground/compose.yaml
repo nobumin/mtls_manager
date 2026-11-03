@@ -4,6 +4,7 @@
 #   server-b     … nginx（mTLS。8443 番）
 # PC から見えるのは管理画面だけ。server-a / server-b の 8443 番は公開しない。
 # どのコンテナも、止まったら起こし直す（restart）。init は、止まった子プロセス（mtls-agent など）を回収する。
+# 表示の言語は PC の環境変数 MTLS_LANG を引き継ぐ（MTLS_LANG=en docker compose up -d で英語。既定は日本語）。
 name: mtls-playground
 
 x-build: &build
@@ -13,6 +14,8 @@ x-build: &build
 services:
   mtls-manager:
     build: { <<: *build, target: manager }
+    environment:
+      MTLS_LANG: ${MTLS_LANG:-ja}
     restart: unless-stopped
     init: true
     hostname: ca
@@ -33,6 +36,8 @@ services:
 
   server-a:
     build: { <<: *build, target: server-a }
+    environment:
+      MTLS_LANG: ${MTLS_LANG:-ja}
     restart: unless-stopped
     init: true
     hostname: server-a
@@ -45,6 +50,8 @@ services:
 
   server-b:
     build: { <<: *build, target: server-b }
+    environment:
+      MTLS_LANG: ${MTLS_LANG:-ja}
     restart: unless-stopped
     init: true
     hostname: server-b

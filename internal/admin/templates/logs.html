@@ -1,17 +1,17 @@
 {{define "content"}}
 <form class="filter" id="log-filter">
   <select name="level" id="log-level">
-    <option value="DEBUG">すべて（debug 以上）</option>
-    <option value="INFO" selected>info 以上</option>
-    <option value="WARN">warn 以上</option>
-    <option value="ERROR">error のみ</option>
+    <option value="DEBUG">{{t "すべて（debug 以上）" "All (debug and above)"}}</option>
+    <option value="INFO" selected>{{t "info 以上" "info and above"}}</option>
+    <option value="WARN">{{t "warn 以上" "warn and above"}}</option>
+    <option value="ERROR">{{t "error のみ" "error only"}}</option>
   </select>
-  <input type="search" id="log-q" placeholder="文字列で絞り込み（例: category=audit、serial=…）">
-  <label><input type="checkbox" id="log-follow" checked> 自動更新</label>
+  <input type="search" id="log-q" placeholder="{{t "文字列で絞り込み（例: category=audit、serial=…）" "Filter by text (e.g. category=audit, serial=…)"}}">
+  <label><input type="checkbox" id="log-follow" checked> {{t "自動更新" "Auto refresh"}}</label>
 </form>
-<p class="muted">mtls-ca の起動以降の直近のログ（件数に上限あり）。それより前のログは journald などの通常の出力先で確認する。</p>
+<p class="muted">{{t "mtls-ca の起動以降の直近のログ（件数に上限あり）。それより前のログは journald などの通常の出力先で確認する。" "Recent logs since mtls-ca started (the number of entries is limited). Check older logs in the usual destination, such as journald."}}</p>
 <table id="log-table" class="logs">
-  <thead><tr><th>時刻</th><th>重要度</th><th>メッセージ</th><th>属性</th></tr></thead>
+  <thead><tr><th>{{t "時刻" "Time"}}</th><th>{{t "重要度" "Level"}}</th><th>{{t "メッセージ" "Message"}}</th><th>{{t "属性" "Attributes"}}</th></tr></thead>
   <tbody></tbody>
 </table>
 <script src="/static/logs.js"></script>

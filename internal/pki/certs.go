@@ -14,6 +14,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/nobumin/mtls_manager/internal/i18n"
 	"github.com/nobumin/mtls_manager/internal/names"
 )
 
@@ -48,7 +49,7 @@ func ParseCertsPEM(data []byte) ([]*x509.Certificate, error) {
 		certs = append(certs, c)
 	}
 	if len(certs) == 0 {
-		return nil, errors.New("証明書の PEM ブロックが見つからない")
+		return nil, errors.New(i18n.T("証明書の PEM ブロックが見つからない", "no certificate PEM block found"))
 	}
 	return certs, nil
 }
@@ -99,7 +100,7 @@ type RootOptions struct {
 // CreateRoot は自己署名のルート CA 証明書を作る。中間 CA を 1 段だけ持てる（MaxPathLen=1）。
 func CreateRoot(key crypto.Signer, o RootOptions) (*x509.Certificate, error) {
 	if o.CommonName == "" {
-		return nil, errors.New("ルート CA の CN が空")
+		return nil, errors.New(i18n.T("ルート CA の CN が空", "the root CA CN is empty"))
 	}
 	serial, err := RandomSerial()
 	if err != nil {
@@ -127,7 +128,7 @@ func CreateRoot(key crypto.Signer, o RootOptions) (*x509.Certificate, error) {
 // ルート CA の鍵があるオフライン端末で署名してもらうために使う。
 func CreateCSR(key crypto.Signer, commonName, organization string) ([]byte, error) {
 	if commonName == "" {
-		return nil, errors.New("CN が空")
+		return nil, errors.New(i18n.T("CN が空", "CN is empty"))
 	}
 	return x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{
 		Subject: subject(commonName, organization),
@@ -143,14 +144,14 @@ func EncodeCSRPEM(der []byte) []byte {
 func ParseCSRPEM(data []byte) (*x509.CertificateRequest, error) {
 	block, _ := pem.Decode(data)
 	if block == nil || block.Type != "CERTIFICATE REQUEST" {
-		return nil, errors.New("CSR の PEM ブロックが見つからない")
+		return nil, errors.New(i18n.T("CSR の PEM ブロックが見つからない", "no CSR PEM block found"))
 	}
 	csr, err := x509.ParseCertificateRequest(block.Bytes)
 	if err != nil {
 		return nil, err
 	}
 	if err := csr.CheckSignature(); err != nil {
-		return nil, fmt.Errorf("CSR の署名が不正: %w", err)
+		return nil, fmt.Errorf(i18n.T("CSR の署名が不正: %w", "invalid CSR signature: %w"), err)
 	}
 	return csr, nil
 }
@@ -170,13 +171,13 @@ func SignIntermediate(root *x509.Certificate, rootKey crypto.Signer, csr *x509.C
 		return nil, err
 	}
 	if !PublicKeyEqual(root.PublicKey, rootKey.Public()) {
-		return nil, errors.New("ルート CA の証明書と秘密鍵が対応していない")
+		return nil, errors.New(i18n.T("ルート CA の証明書と秘密鍵が対応していない", "the root CA certificate and private key do not match"))
 	}
 	permitted := make([]string, 0, len(o.PermittedDomains))
 	for _, d := range o.PermittedDomains {
 		d = names.Normalize(d)
 		if err := names.ValidateDomain(d); err != nil {
-			return nil, fmt.Errorf("名前制約: %w", err)
+			return nil, fmt.Errorf(i18n.T("名前制約: %w", "name constraints: %w"), err)
 		}
 		permitted = append(permitted, d)
 	}
@@ -220,10 +221,10 @@ type Issuer struct {
 // NewIssuer は中間 CA の証明書・鍵・ルートの組み合わせが正しいことを確かめる。
 func NewIssuer(intermediate *x509.Certificate, key crypto.Signer, root *x509.Certificate) (*Issuer, error) {
 	if !intermediate.IsCA {
-		return nil, errors.New("中間 CA の証明書が CA ではない")
+		return nil, errors.New(i18n.T("中間 CA の証明書が CA ではない", "the intermediate CA certificate is not a CA"))
 	}
 	if !PublicKeyEqual(intermediate.PublicKey, key.Public()) {
-		return nil, errors.New("中間 CA の証明書と秘密鍵が対応していない")
+		return nil, errors.New(i18n.T("中間 CA の証明書と秘密鍵が対応していない", "the intermediate CA certificate and private key do not match"))
 	}
 	roots := x509.NewCertPool()
 	roots.AddCert(root)
@@ -231,7 +232,7 @@ func NewIssuer(intermediate *x509.Certificate, key crypto.Signer, root *x509.Cer
 		Roots:     roots,
 		KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
 	}); err != nil {
-		return nil, fmt.Errorf("中間 CA がルート CA につながらない: %w", err)
+		return nil, fmt.Errorf(i18n.T("中間 CA がルート CA につながらない: %w", "the intermediate CA does not chain to the root CA: %w"), err)
 	}
 	return &Issuer{Cert: intermediate, Key: key, Root: root}, nil
 }
@@ -259,7 +260,7 @@ func (i *Issuer) Permits(name string) bool {
 }
 
 // ErrIssuerExpiring は中間 CA の残りの有効期間が短すぎて、発行を拒否したことを表す。
-var ErrIssuerExpiring = errors.New("中間 CA の有効期限が近く、証明書の有効期間を確保できない（中間 CA を更新すること）")
+var ErrIssuerExpiring = i18n.Error("中間 CA の有効期限が近く、証明書の有効期間を確保できない（中間 CA を更新すること）", "the intermediate CA expires too soon to cover the certificate lifetime (rotate the intermediate CA)")
 
 // LeafNotAfter は validity で発行したときの NotAfter（中間 CA の期限で切り詰めたもの）を返す。
 func (i *Issuer) LeafNotAfter(now time.Time, validity time.Duration) time.Time {
@@ -284,14 +285,14 @@ func (i *Issuer) IssueLeaf(pub crypto.PublicKey, dnsNames []string, validity tim
 // （短い証明書を全サーバが取り直し続けるのを防ぐ）。
 func (i *Issuer) IssueLeafWithSerial(serial *big.Int, pub crypto.PublicKey, dnsNames []string, validity time.Duration) (*x509.Certificate, error) {
 	if len(dnsNames) == 0 {
-		return nil, errors.New("名前が空")
+		return nil, errors.New(i18n.T("名前が空", "name is empty"))
 	}
 	if err := CheckPublicKey(pub); err != nil {
 		return nil, err
 	}
 	for _, n := range dnsNames {
 		if !i.Permits(n) {
-			return nil, fmt.Errorf("%q は中間 CA の名前制約 %v の範囲外", n, i.Cert.PermittedDNSDomains)
+			return nil, fmt.Errorf(i18n.T("%q は中間 CA の名前制約 %v の範囲外", "%q is outside the intermediate CA's name constraints %v"), n, i.Cert.PermittedDNSDomains)
 		}
 	}
 	now := time.Now()

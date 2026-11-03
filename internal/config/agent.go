@@ -8,6 +8,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/nobumin/mtls_manager/internal/i18n"
 	"github.com/nobumin/mtls_manager/internal/names"
 	"github.com/nobumin/mtls_manager/internal/pki"
 )
@@ -110,17 +111,17 @@ func LoadAgent(path string) (*Agent, error) {
 func (a *Agent) Complete() error {
 	u, err := url.Parse(a.CAURL)
 	if err != nil || u.Scheme != "https" || u.Host == "" {
-		return errors.New("ca_url は https:// で始まる ACME ディレクトリの URL にする")
+		return errors.New(i18n.T("ca_url は https:// で始まる ACME ディレクトリの URL にする", "ca_url must be an ACME directory URL starting with https://"))
 	}
 	for _, f := range []struct{ name, v string }{
 		{"ca_root", a.CARoot}, {"account_key", a.AccountKey}, {"output.cert", a.Output.Cert}, {"output.key", a.Output.Key},
 	} {
 		if f.v == "" {
-			return fmt.Errorf("%s は必須", f.name)
+			return fmt.Errorf(i18n.T("%s は必須", "%s is required"), f.name)
 		}
 	}
 	if len(a.Names) == 0 {
-		return errors.New("names は必須")
+		return errors.New(i18n.T("names は必須", "names is required"))
 	}
 	for i, n := range a.Names {
 		n = names.Normalize(n)
@@ -135,7 +136,7 @@ func (a *Agent) Complete() error {
 		a.KeyType = pki.KeyECDSAP256
 	}
 	if !slices.Contains(pki.KeyTypes, a.KeyType) {
-		return fmt.Errorf("key_type: 未対応の %q（%v）", a.KeyType, pki.KeyTypes)
+		return fmt.Errorf(i18n.T("key_type: 未対応の %q（%v）", "key_type: unsupported %q (%v)"), a.KeyType, pki.KeyTypes)
 	}
 
 	switch a.Challenge.Type {
@@ -143,10 +144,10 @@ func (a *Agent) Complete() error {
 		a.Challenge.Type = ChallengeHTTP01
 	case ChallengeHTTP01, ChallengeTLSALPN01:
 	default:
-		return fmt.Errorf("challenge.type: 未対応の %q", a.Challenge.Type)
+		return fmt.Errorf(i18n.T("challenge.type: 未対応の %q", "challenge.type: unsupported %q"), a.Challenge.Type)
 	}
 	if a.Challenge.Webroot != "" && a.Challenge.Type != ChallengeHTTP01 {
-		return errors.New("challenge.webroot は http-01 でのみ使える")
+		return errors.New(i18n.T("challenge.webroot は http-01 でのみ使える", "challenge.webroot can only be used with http-01"))
 	}
 	if a.Challenge.Listen == "" {
 		if a.Challenge.Type == ChallengeHTTP01 {
@@ -162,20 +163,20 @@ func (a *Agent) Complete() error {
 	case "0640", "640":
 		a.Output.keyMode = 0o640
 	default:
-		return fmt.Errorf("output.key_mode は 0600 か 0640（%q）", a.Output.KeyMode)
+		return fmt.Errorf(i18n.T("output.key_mode は 0600 か 0640（%q）", "output.key_mode must be 0600 or 0640 (%q)"), a.Output.KeyMode)
 	}
 
 	if a.Renew.Fraction == 0 {
 		a.Renew.Fraction = 0.66
 	}
 	if a.Renew.Fraction < 0.1 || a.Renew.Fraction > 0.9 {
-		return errors.New("renew.fraction は 0.1〜0.9")
+		return errors.New(i18n.T("renew.fraction は 0.1〜0.9", "renew.fraction must be 0.1 to 0.9"))
 	}
 	if a.Renew.CheckInterval == 0 {
 		a.Renew.CheckInterval = Duration(time.Minute)
 	}
 	if a.Renew.CheckInterval.D() < time.Second {
-		return errors.New("renew.check_interval は 1s 以上")
+		return errors.New(i18n.T("renew.check_interval は 1s 以上", "renew.check_interval must be at least 1s"))
 	}
 	if a.Renew.Timeout == 0 {
 		a.Renew.Timeout = Duration(5 * time.Minute)

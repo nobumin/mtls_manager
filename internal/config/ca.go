@@ -8,6 +8,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/nobumin/mtls_manager/internal/i18n"
 	"github.com/nobumin/mtls_manager/internal/names"
 )
 
@@ -142,11 +143,11 @@ func (c *CA) Complete() error {
 		c.Listen = ":8443"
 	}
 	if c.ExternalURL == "" {
-		return errors.New("external_url は必須")
+		return errors.New(i18n.T("external_url は必須", "external_url is required"))
 	}
 	u, err := url.Parse(c.ExternalURL)
 	if err != nil || u.Scheme != "https" || u.Host == "" || (u.Path != "" && u.Path != "/") || u.RawQuery != "" {
-		return fmt.Errorf("external_url %q は https://ホスト[:ポート] の形にする", c.ExternalURL)
+		return fmt.Errorf(i18n.T("external_url %q は https://ホスト[:ポート] の形にする", "external_url %q must be of the form https://host[:port]"), c.ExternalURL)
 	}
 	c.ExternalURL = u.Scheme + "://" + u.Host
 	if len(c.Hostnames) == 0 {
@@ -164,7 +165,7 @@ func (c *CA) Complete() error {
 		{"intermediate_key", c.IntermediateKey}, {"eab_file", c.EABFile},
 	} {
 		if f.v == "" {
-			return fmt.Errorf("%s は必須", f.name)
+			return fmt.Errorf(i18n.T("%s は必須", "%s is required"), f.name)
 		}
 	}
 	if c.allowedPrefixes, err = parsePrefixes("allowed_client_cidrs", c.AllowedClientCIDRs); err != nil {
@@ -172,7 +173,7 @@ func (c *CA) Complete() error {
 	}
 
 	if len(c.Policy.AllowedDomains) == 0 {
-		return errors.New("policy.allowed_domains は必須（発行してよいドメインを限定する）")
+		return errors.New(i18n.T("policy.allowed_domains は必須（発行してよいドメインを限定する）", "policy.allowed_domains is required (it limits the domains that may be issued)"))
 	}
 	for i, d := range c.Policy.AllowedDomains {
 		d = names.Normalize(d)
@@ -185,14 +186,14 @@ func (c *CA) Complete() error {
 		c.Policy.MaxNamesPerOrder = 10
 	}
 	if c.Policy.MaxNamesPerOrder < 1 || c.Policy.MaxNamesPerOrder > 100 {
-		return errors.New("policy.max_names_per_order は 1〜100")
+		return errors.New(i18n.T("policy.max_names_per_order は 1〜100", "policy.max_names_per_order must be 1 to 100"))
 	}
 
 	if c.Cert.Validity == 0 {
 		c.Cert.Validity = Duration(24 * time.Hour)
 	}
 	if v := c.Cert.Validity.D(); v < 10*time.Minute || v > 90*24*time.Hour {
-		return errors.New("cert.validity は 10m〜90d")
+		return errors.New(i18n.T("cert.validity は 10m〜90d", "cert.validity must be 10m to 90d"))
 	}
 
 	if len(c.Challenge.Types) == 0 {
@@ -200,11 +201,11 @@ func (c *CA) Complete() error {
 	}
 	for i, t := range c.Challenge.Types {
 		if t != ChallengeHTTP01 && t != ChallengeTLSALPN01 {
-			return fmt.Errorf("challenge.types: 未対応の %q（%s / %s）", t, ChallengeHTTP01, ChallengeTLSALPN01)
+			return fmt.Errorf(i18n.T("challenge.types: 未対応の %q（%s / %s）", "challenge.types: unsupported %q (%s / %s)"), t, ChallengeHTTP01, ChallengeTLSALPN01)
 		}
 		// 重複は意図しない設定なので、黙って除かずにエラーにする（提示順に意味があるのでソートもしない）。
 		if slices.Contains(c.Challenge.Types[:i], t) {
-			return fmt.Errorf("challenge.types: %q が重複している", t)
+			return fmt.Errorf(i18n.T("challenge.types: %q が重複している", "challenge.types: %q is duplicated"), t)
 		}
 	}
 	if c.Challenge.HTTP01Port == 0 {
@@ -215,7 +216,7 @@ func (c *CA) Complete() error {
 	}
 	for _, p := range []int{c.Challenge.HTTP01Port, c.Challenge.TLSALPN01Port} {
 		if p < 1 || p > 65535 {
-			return errors.New("challenge のポートは 1〜65535")
+			return errors.New(i18n.T("challenge のポートは 1〜65535", "challenge ports must be 1 to 65535"))
 		}
 	}
 	if c.Challenge.Timeout == 0 {
@@ -225,7 +226,7 @@ func (c *CA) Complete() error {
 		c.Challenge.Attempts = 3
 	}
 	if c.Challenge.Attempts < 1 || c.Challenge.Attempts > 10 {
-		return errors.New("challenge.attempts は 1〜10")
+		return errors.New(i18n.T("challenge.attempts は 1〜10", "challenge.attempts must be 1 to 10"))
 	}
 	if c.CRL.Validity == 0 {
 		c.CRL.Validity = Duration(24 * time.Hour)
@@ -238,7 +239,7 @@ func (c *CA) Complete() error {
 			c.Federation.BundleValidity = Duration(48 * time.Hour)
 		}
 		if v := c.Federation.BundleValidity.D(); v < time.Hour || v > 7*24*time.Hour {
-			return errors.New("federation.bundle_validity は 1h〜168h")
+			return errors.New(i18n.T("federation.bundle_validity は 1h〜168h", "federation.bundle_validity must be 1h to 168h"))
 		}
 	}
 	return c.Log.complete()
@@ -257,10 +258,10 @@ func (l *Log) complete() error {
 	switch l.Level {
 	case "debug", "info", "warn", "error":
 	default:
-		return fmt.Errorf("log.level: 未対応の %q", l.Level)
+		return fmt.Errorf(i18n.T("log.level: 未対応の %q", "log.level: unsupported %q"), l.Level)
 	}
 	if l.Format != "text" && l.Format != "json" {
-		return fmt.Errorf("log.format: 未対応の %q", l.Format)
+		return fmt.Errorf(i18n.T("log.format: 未対応の %q", "log.format: unsupported %q"), l.Format)
 	}
 	return nil
 }
@@ -270,7 +271,7 @@ func (a *CAAdmin) complete() error {
 		return nil
 	}
 	if len(a.AllowedClients) == 0 {
-		return errors.New("admin.allowed_clients は必須（管理画面に入れる管理者の証明書の名前を指定する）")
+		return errors.New(i18n.T("admin.allowed_clients は必須（管理画面に入れる管理者の証明書の名前を指定する）", "admin.allowed_clients is required (the certificate names of administrators allowed into the admin UI)"))
 	}
 	for i, p := range a.AllowedClients {
 		p = names.Normalize(p)
@@ -294,7 +295,7 @@ func (a *CAAdmin) complete() error {
 		a.LogBuffer = 5000
 	}
 	if a.LogBuffer < 100 || a.LogBuffer > 100000 {
-		return errors.New("admin.log_buffer は 100〜100000")
+		return errors.New(i18n.T("admin.log_buffer は 100〜100000", "admin.log_buffer must be 100 to 100000"))
 	}
 	return nil
 }
@@ -307,7 +308,7 @@ func parsePrefixes(key string, list []string) ([]netip.Prefix, error) {
 		if err != nil {
 			a, aerr := netip.ParseAddr(s)
 			if aerr != nil {
-				return nil, fmt.Errorf("%s: %q を解釈できない", key, s)
+				return nil, fmt.Errorf(i18n.T("%s: %q を解釈できない", "%s: cannot parse %q"), key, s)
 			}
 			p = netip.PrefixFrom(a, a.BitLen())
 		}

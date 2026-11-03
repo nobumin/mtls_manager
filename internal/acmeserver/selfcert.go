@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nobumin/mtls_manager/internal/i18n"
 	"github.com/nobumin/mtls_manager/internal/pki"
 )
 
@@ -25,7 +26,7 @@ type SelfCert struct {
 func NewSelfCert(iss *pki.Issuer, names []string, validity time.Duration) (*SelfCert, error) {
 	for _, n := range names {
 		if !iss.Permits(n) {
-			return nil, fmt.Errorf("CA のホスト名 %q が中間 CA の名前制約 %v の範囲外", n, iss.Cert.PermittedDNSDomains)
+			return nil, fmt.Errorf(i18n.T("CA のホスト名 %q が中間 CA の名前制約 %v の範囲外", "CA host name %q is outside the intermediate CA's name constraints %v"), n, iss.Cert.PermittedDNSDomains)
 		}
 	}
 	s := &SelfCert{issuer: iss, names: names, validity: validity}

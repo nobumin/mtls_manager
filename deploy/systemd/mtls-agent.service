@@ -19,6 +19,8 @@ User=mtls-agent
 # To let an app read the key, use a shared group and set output.key_mode to 0640
 Group=mtls-agent
 ExecStart=/usr/local/bin/mtls-agent run -config /etc/mtls-agent/config.yaml
+# 表示を英語にする（既定は日本語） / Show messages in English (default: Japanese)
+# Environment=MTLS_LANG=en
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure
 RestartSec=10s

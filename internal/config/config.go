@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"go.yaml.in/yaml/v3"
+
+	"github.com/nobumin/mtls_manager/internal/i18n"
 )
 
 // Duration は "24h" のような Go の書式に加えて "7d"（日）・"10y"（365 日単位の年）を受け付ける。
@@ -27,14 +29,14 @@ func ParseDuration(s string) (time.Duration, error) {
 		if num, ok := strings.CutSuffix(s, suffix); ok {
 			n, err := strconv.Atoi(num)
 			if err != nil || n < 0 {
-				return 0, fmt.Errorf("期間 %q を解釈できない", s)
+				return 0, fmt.Errorf(i18n.T("期間 %q を解釈できない", "cannot parse duration %q"), s)
 			}
 			return time.Duration(n) * unit, nil
 		}
 	}
 	d, err := time.ParseDuration(s)
 	if err != nil {
-		return 0, fmt.Errorf("期間 %q を解釈できない（例: 24h, 7d, 10y）", s)
+		return 0, fmt.Errorf(i18n.T("期間 %q を解釈できない（例: 24h, 7d, 10y）", "cannot parse duration %q (e.g. 24h, 7d, 10y)"), s)
 	}
 	return d, nil
 }

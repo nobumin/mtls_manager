@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/nobumin/mtls_manager/internal/flock"
+	"github.com/nobumin/mtls_manager/internal/i18n"
 	"github.com/nobumin/mtls_manager/internal/names"
 	"github.com/nobumin/mtls_manager/internal/pki"
 )
@@ -38,10 +39,10 @@ type Key struct {
 func (k Key) HMACKey() ([]byte, error) {
 	b, err := base64.RawURLEncoding.DecodeString(k.HMAC)
 	if err != nil {
-		return nil, fmt.Errorf("EAB 鍵 %s の hmac が不正: %w", k.KID, err)
+		return nil, fmt.Errorf(i18n.T("EAB 鍵 %s の hmac が不正: %w", "invalid hmac for EAB key %s: %w"), k.KID, err)
 	}
 	if len(b) < 32 {
-		return nil, fmt.Errorf("EAB 鍵 %s の hmac が短すぎる", k.KID)
+		return nil, fmt.Errorf(i18n.T("EAB 鍵 %s の hmac が短すぎる", "hmac for EAB key %s is too short"), k.KID)
 	}
 	return b, nil
 }
@@ -67,7 +68,7 @@ func Load(path string) (*File, error) {
 	seen := map[string]bool{}
 	for _, k := range f.Keys {
 		if k.KID == "" || seen[k.KID] {
-			return nil, fmt.Errorf("%s: kid が空または重複している", path)
+			return nil, fmt.Errorf(i18n.T("%s: kid が空または重複している", "%s: empty or duplicate kid"), path)
 		}
 		seen[k.KID] = true
 		if _, err := k.HMACKey(); err != nil {
@@ -103,7 +104,7 @@ func (f *File) Save(path string) error {
 // Add は新しい鍵を作って追加し、その鍵を返す。
 func (f *File) Add(patterns []string, note string) (Key, error) {
 	if len(patterns) == 0 {
-		return Key{}, errors.New("発行してよい名前（パターン）を 1 つ以上指定する")
+		return Key{}, errors.New(i18n.T("発行してよい名前（パターン）を 1 つ以上指定する", "specify at least one name (pattern) that may be issued"))
 	}
 	norm := make([]string, 0, len(patterns))
 	for _, p := range patterns {
@@ -199,7 +200,7 @@ func (s *Store) reloadLocked() error {
 func Update(path string, fn func(*File) error) error {
 	unlock, err := flock.Lock(path)
 	if err != nil {
-		return fmt.Errorf("%s をロックできない: %w", path, err)
+		return fmt.Errorf(i18n.T("%s をロックできない: %w", "cannot lock %s: %w"), path, err)
 	}
 	defer unlock()
 	f, err := LoadOrEmpty(path)

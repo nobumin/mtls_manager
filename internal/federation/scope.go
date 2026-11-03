@@ -9,6 +9,7 @@ import (
 
 	"golang.org/x/net/publicsuffix"
 
+	"github.com/nobumin/mtls_manager/internal/i18n"
 	"github.com/nobumin/mtls_manager/internal/names"
 )
 
@@ -18,18 +19,18 @@ import (
 //   - 空の範囲は不可
 func NormalizeScope(domains []string) ([]string, error) {
 	if len(domains) == 0 {
-		return nil, errors.New("範囲（ドメイン）が空")
+		return nil, errors.New(i18n.T("範囲（ドメイン）が空", "the scope (domains) is empty"))
 	}
 	out := normalizeAll(domains)
 	for _, d := range out {
 		if err := names.ValidateDomain(d); err != nil {
-			return nil, fmt.Errorf("範囲: %w", err)
+			return nil, fmt.Errorf(i18n.T("範囲: %w", "scope: %w"), err)
 		}
 		if !strings.Contains(d, ".") {
-			return nil, fmt.Errorf("範囲 %q は広すぎる（2 ラベル以上にする）", d)
+			return nil, fmt.Errorf(i18n.T("範囲 %q は広すぎる（2 ラベル以上にする）", "scope %q is too broad (use at least two labels)"), d)
 		}
 		if suffix, _ := publicsuffix.PublicSuffix(d); suffix == d {
-			return nil, fmt.Errorf("範囲 %q はパブリックサフィックスなので使えない", d)
+			return nil, fmt.Errorf(i18n.T("範囲 %q はパブリックサフィックスなので使えない", "scope %q is a public suffix and cannot be used"), d)
 		}
 	}
 	return sortedUnique(out), nil
@@ -64,25 +65,25 @@ func WithinScope(narrow, wide []string) bool {
 //   - 名前制約が無い・空なら、範囲は得られない（エラー。連携先を 1 つも信頼しない）
 func OwnScope(inter *x509.Certificate, roots *x509.CertPool, narrow []string) ([]string, error) {
 	if inter == nil {
-		return nil, errors.New("自分の中間 CA の証明書が無い")
+		return nil, errors.New(i18n.T("自分の中間 CA の証明書が無い", "your own intermediate CA certificate is missing"))
 	}
 	if _, err := inter.Verify(x509.VerifyOptions{Roots: roots, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny}}); err != nil {
-		return nil, fmt.Errorf("自分の中間 CA の証明書を、自分のルート CA で検証できない: %w", err)
+		return nil, fmt.Errorf(i18n.T("自分の中間 CA の証明書を、自分のルート CA で検証できない: %w", "cannot verify your own intermediate CA certificate with your own root CA: %w"), err)
 	}
 	if !inter.IsCA {
-		return nil, errors.New("自分の中間 CA の証明書が CA ではない")
+		return nil, errors.New(i18n.T("自分の中間 CA の証明書が CA ではない", "your own intermediate CA certificate is not a CA"))
 	}
 	permitted := normalizeAll(inter.PermittedDNSDomains)
 	permitted = slices.DeleteFunc(permitted, func(d string) bool { return d == "" })
 	if len(permitted) == 0 {
-		return nil, errors.New("自分の中間 CA に名前制約が無いので、自分の範囲が決まらない（連携版は名前制約のある中間 CA が必要）")
+		return nil, errors.New(i18n.T("自分の中間 CA に名前制約が無いので、自分の範囲が決まらない（連携版は名前制約のある中間 CA が必要）", "your own intermediate CA has no name constraints, so your scope is unknown (federation requires an intermediate CA with name constraints)"))
 	}
 	if len(narrow) == 0 {
 		return sortedUnique(permitted), nil
 	}
 	n := normalizeAll(narrow)
 	if !WithinScope(n, permitted) {
-		return nil, fmt.Errorf("own_domains %v が中間 CA の名前制約 %v より広い（狭めることだけができる）", n, permitted)
+		return nil, fmt.Errorf(i18n.T("own_domains %v が中間 CA の名前制約 %v より広い（狭めることだけができる）", "own_domains %v is wider than the intermediate CA's name constraints %v (it can only be narrowed)"), n, permitted)
 	}
 	return sortedUnique(n), nil
 }
@@ -94,18 +95,18 @@ func OwnScope(inter *x509.Certificate, roots *x509.CertPool, narrow []string) ([
 //   - DNS 名がすべて scope の配下にある
 func CheckPeer(leaf *x509.Certificate, scope []string) error {
 	if len(leaf.DNSNames) == 0 {
-		return errors.New("連携先の証明書に DNS 名が無い")
+		return errors.New(i18n.T("連携先の証明書に DNS 名が無い", "the partner certificate has no DNS name"))
 	}
 	if len(leaf.IPAddresses) > 0 || len(leaf.URIs) > 0 || len(leaf.EmailAddresses) > 0 {
-		return errors.New("連携先の証明書に DNS 名以外の名前（IP アドレス・URI・メールアドレス）がある")
+		return errors.New(i18n.T("連携先の証明書に DNS 名以外の名前（IP アドレス・URI・メールアドレス）がある", "the partner certificate has names other than DNS names (IP addresses, URIs or email addresses)"))
 	}
 	for _, n := range leaf.DNSNames {
 		n = names.Normalize(n)
 		if strings.Contains(n, "*") {
-			return fmt.Errorf("連携先の証明書にワイルドカードの名前 %q がある", n)
+			return fmt.Errorf(i18n.T("連携先の証明書にワイルドカードの名前 %q がある", "the partner certificate has a wildcard name %q"), n)
 		}
 		if !names.WithinAnyDomain(scope, n) {
-			return fmt.Errorf("連携先の証明書の名前 %q が、その連携先の範囲 %v の外", n, scope)
+			return fmt.Errorf(i18n.T("連携先の証明書の名前 %q が、その連携先の範囲 %v の外", "partner certificate name %q is outside that partner's scope %v"), n, scope)
 		}
 	}
 	return nil

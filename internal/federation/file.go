@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/nobumin/mtls_manager/internal/flock"
+	"github.com/nobumin/mtls_manager/internal/i18n"
 	"github.com/nobumin/mtls_manager/internal/pki"
 )
 
@@ -133,12 +134,12 @@ func (f *File) Import(id string, rec *Record, root *x509.Certificate, now time.T
 		return err
 	}
 	if f.Find(id) != nil {
-		return fmt.Errorf("連携先 %q はすでにある", id)
+		return fmt.Errorf(i18n.T("連携先 %q はすでにある", "partner %q already exists"), id)
 	}
 	fp := Fingerprint(root)
 	for _, p := range f.Partners {
 		if FingerprintEqual(p.RootSHA256, fp) || FingerprintEqual(p.NextRootSHA256, fp) {
-			return fmt.Errorf("このルート CA はすでに連携先 %q として取り込んである", p.ID)
+			return fmt.Errorf(i18n.T("このルート CA はすでに連携先 %q として取り込んである", "this root CA is already imported as partner %q"), p.ID)
 		}
 	}
 	p := Partner{
@@ -146,7 +147,7 @@ func (f *File) Import(id string, rec *Record, root *x509.Certificate, now time.T
 		RootCert: string(pki.EncodeCertsPEM(root)), RootSHA256: fp, DeclaredDomains: rec.Domains,
 		ImportedAt: now.UTC().Truncate(time.Second),
 	}
-	p.record("import", by, "指紋 "+fp, now)
+	p.record("import", by, i18n.T("指紋 ", "fingerprint ")+fp, now)
 	f.Partners = append(f.Partners, p)
 	return nil
 }
@@ -169,22 +170,22 @@ type RequestOptions struct {
 func (f *File) Request(id string, o RequestOptions, ownScope []string, now time.Time) error {
 	p := f.Find(id)
 	if p == nil {
-		return fmt.Errorf("連携先 %q が無い", id)
+		return fmt.Errorf(i18n.T("連携先 %q が無い", "no partner %q"), id)
 	}
 	if p.State != StatePending && p.State != StateSuspended {
-		return fmt.Errorf("連携先 %q は %s の状態なので申請できない（pending か suspended のときだけ）", id, p.State)
+		return fmt.Errorf(i18n.T("連携先 %q は %s の状態なので申請できない（pending か suspended のときだけ）", "partner %q is in state %s, so approval cannot be requested (only when pending or suspended)"), id, p.State)
 	}
 	if NormalizeFingerprint(o.Fingerprint) == "" {
-		return errors.New("指紋は全体（64 桁の 16 進）を入力する")
+		return errors.New(i18n.T("指紋は全体（64 桁の 16 進）を入力する", "enter the full fingerprint (64 hex digits)"))
 	}
 	if !FingerprintEqual(o.Fingerprint, p.RootSHA256) {
-		return errors.New("入力した指紋が、取り込んだルート CA の指紋と一致しない（照合をやり直す）")
+		return errors.New(i18n.T("入力した指紋が、取り込んだルート CA の指紋と一致しない（照合をやり直す）", "the entered fingerprint does not match the imported root CA (redo the comparison)"))
 	}
 	if o.ComparedWith == "" {
-		return errors.New("照合した相手と経路（ファイルとは無関係に前もって知っている連絡先）を入力する")
+		return errors.New(i18n.T("照合した相手と経路（ファイルとは無関係に前もって知っている連絡先）を入力する", "enter who you compared with and how (a contact you knew beforehand, independent of the file)"))
 	}
 	if o.By.Name == "" {
-		return errors.New("申請する管理者の名前が無い")
+		return errors.New(i18n.T("申請する管理者の名前が無い", "the requesting administrator's name is missing"))
 	}
 	scope := p.DeclaredDomains
 	if len(o.Domains) > 0 {
@@ -193,7 +194,7 @@ func (f *File) Request(id string, o RequestOptions, ownScope []string, now time.
 			return err
 		}
 		if !WithinScope(s, p.DeclaredDomains) {
-			return fmt.Errorf("範囲 %v は、相手の申告 %v より広い（狭めることだけができる）", s, p.DeclaredDomains)
+			return fmt.Errorf(i18n.T("範囲 %v は、相手の申告 %v より広い（狭めることだけができる）", "scope %v is wider than the partner's declaration %v (it can only be narrowed)"), s, p.DeclaredDomains)
 		}
 		scope = s
 	}
@@ -205,7 +206,7 @@ func (f *File) Request(id string, o RequestOptions, ownScope []string, now time.
 		validity = DefaultPartnerValidity
 	}
 	if validity < 24*time.Hour || validity > 2*DefaultPartnerValidity {
-		return errors.New("連携の有効期限は 1 日〜2 年")
+		return errors.New(i18n.T("連携の有効期限は 1 日〜2 年", "the federation expiry must be 1 day to 2 years"))
 	}
 	// 申請し直すとき（停止の後など）は、次のルートも照合し直す（予告を取り込み直す）。
 	p.clearNext()
@@ -213,7 +214,7 @@ func (f *File) Request(id string, o RequestOptions, ownScope []string, now time.
 	p.RequestedBy, p.RequestedVia, p.RequestedAt = o.By.Name, o.By.Via, now.UTC().Truncate(time.Second)
 	p.ApprovedBy, p.ApprovedVia, p.ApprovedAt = "", "", time.Time{}
 	p.Expires = now.Add(validity).UTC().Truncate(time.Second)
-	p.record("request", o.By, fmt.Sprintf("範囲 %v、照合 %s", scope, o.ComparedWith), now)
+	p.record("request", o.By, fmt.Sprintf(i18n.T("範囲 %v、照合 %s", "scope %v, compared with %s"), scope, o.ComparedWith), now)
 	return nil
 }
 
@@ -222,36 +223,36 @@ func (f *File) Request(id string, o RequestOptions, ownScope []string, now time.
 func (f *File) Approve(id, fingerprint string, by Actor, ownScope []string, now time.Time) error {
 	p := f.Find(id)
 	if p == nil {
-		return fmt.Errorf("連携先 %q が無い", id)
+		return fmt.Errorf(i18n.T("連携先 %q が無い", "no partner %q"), id)
 	}
 	if p.State != StateRequested {
-		return fmt.Errorf("連携先 %q は %s の状態なので承認できない（申請の後だけ）", id, p.State)
+		return fmt.Errorf(i18n.T("連携先 %q は %s の状態なので承認できない（申請の後だけ）", "partner %q is in state %s, so it cannot be approved (only after a request)"), id, p.State)
 	}
 	if by.Name == "" {
-		return errors.New("承認する管理者の名前が無い")
+		return errors.New(i18n.T("承認する管理者の名前が無い", "the approving administrator's name is missing"))
 	}
 	// 承認は申請と同じ経路で行う。画面の名前（証明書）と CLI の名前（自己申告）は別の名前空間なので、
 	// 経路をまたぐと、同じ人でも別の名前に見えて 2 人の承認を 1 人で通せてしまう。
 	if reqVia := viaOrCLI(p.RequestedVia); viaOrCLI(by.Via) != reqVia {
 		if reqVia == ViaCLI {
-			return errors.New("申請と同じ経路で承認する（この連携先は CLI で申請されたので、CLI で承認するか、停止してから管理画面で申請し直す）")
+			return errors.New(i18n.T("申請と同じ経路で承認する（この連携先は CLI で申請されたので、CLI で承認するか、停止してから管理画面で申請し直す）", "approve over the same channel as the request (this partner was requested with the CLI: approve with the CLI, or suspend it and request again in the admin UI)"))
 		}
-		return errors.New("申請と同じ経路で承認する（この連携先は管理画面で申請されたので、管理画面で承認する）")
+		return errors.New(i18n.T("申請と同じ経路で承認する（この連携先は管理画面で申請されたので、管理画面で承認する）", "approve over the same channel as the request (this partner was requested in the admin UI: approve it in the admin UI)"))
 	}
 	if by.Name == p.RequestedBy {
-		return fmt.Errorf("申請した管理者（%s）とは別の管理者が承認する", by.Name)
+		return fmt.Errorf(i18n.T("申請した管理者（%s）とは別の管理者が承認する", "an administrator other than the requester (%s) must approve"), by.Name)
 	}
 	if !FingerprintEqual(fingerprint, p.RootSHA256) {
-		return errors.New("入力した指紋が、取り込んだルート CA の指紋と一致しない")
+		return errors.New(i18n.T("入力した指紋が、取り込んだルート CA の指紋と一致しない", "the entered fingerprint does not match the imported root CA"))
 	}
 	if err := f.checkScope(id, p.Domains, ownScope); err != nil {
 		return err
 	}
 	if !now.Before(p.Expires) {
-		return errors.New("申請した連携の有効期限が過ぎている（申請をやり直す）")
+		return errors.New(i18n.T("申請した連携の有効期限が過ぎている（申請をやり直す）", "the requested federation expiry has passed (request again)"))
 	}
 	p.State, p.ApprovedBy, p.ApprovedVia, p.ApprovedAt = StateActive, by.Name, by.Via, now.UTC().Truncate(time.Second)
-	p.record("approve", by, fmt.Sprintf("範囲 %v", p.Domains), now)
+	p.record("approve", by, fmt.Sprintf(i18n.T("範囲 %v", "scope %v"), p.Domains), now)
 	return nil
 }
 
@@ -259,10 +260,10 @@ func (f *File) Approve(id, fingerprint string, by Actor, ownScope []string, now 
 func (f *File) Suspend(id string, by Actor, reason string, now time.Time) error {
 	p := f.Find(id)
 	if p == nil {
-		return fmt.Errorf("連携先 %q が無い", id)
+		return fmt.Errorf(i18n.T("連携先 %q が無い", "no partner %q"), id)
 	}
 	if p.State == StateSuspended {
-		return fmt.Errorf("連携先 %q はすでに停止している", id)
+		return fmt.Errorf(i18n.T("連携先 %q はすでに停止している", "partner %q is already suspended"), id)
 	}
 	p.State = StateSuspended
 	p.record("suspend", by, reason, now)
@@ -273,10 +274,10 @@ func (f *File) Suspend(id string, by Actor, reason string, now time.Time) error 
 func (f *File) Remove(id string) error {
 	p := f.Find(id)
 	if p == nil {
-		return fmt.Errorf("連携先 %q が無い", id)
+		return fmt.Errorf(i18n.T("連携先 %q が無い", "no partner %q"), id)
 	}
 	if p.State == StateActive {
-		return fmt.Errorf("連携先 %q は有効なので、先に停止する", id)
+		return fmt.Errorf(i18n.T("連携先 %q は有効なので、先に停止する", "partner %q is active; suspend it first"), id)
 	}
 	f.Partners = slices.DeleteFunc(f.Partners, func(q Partner) bool { return q.ID == id })
 	return nil
@@ -285,17 +286,17 @@ func (f *File) Remove(id string) error {
 // checkScope は、範囲が自分の範囲・他の連携先（申請中・有効なもの）の範囲と重ならないことを確かめる。
 func (f *File) checkScope(id string, scope, ownScope []string) error {
 	if len(ownScope) == 0 {
-		return errors.New("自分の範囲が決まらないので、重なりを確かめられない")
+		return errors.New(i18n.T("自分の範囲が決まらないので、重なりを確かめられない", "your own scope is unknown, so overlaps cannot be checked"))
 	}
 	if ScopesOverlap(scope, ownScope) {
-		return fmt.Errorf("範囲 %v が自分の範囲 %v と重なる", scope, ownScope)
+		return fmt.Errorf(i18n.T("範囲 %v が自分の範囲 %v と重なる", "scope %v overlaps your own scope %v"), scope, ownScope)
 	}
 	for _, q := range f.Partners {
 		if q.ID == id || (q.State != StateActive && q.State != StateRequested) {
 			continue
 		}
 		if ScopesOverlap(scope, q.Domains) {
-			return fmt.Errorf("範囲 %v が連携先 %q の範囲 %v と重なる", scope, q.ID, q.Domains)
+			return fmt.Errorf(i18n.T("範囲 %v が連携先 %q の範囲 %v と重なる", "scope %v overlaps partner %q's scope %v"), scope, q.ID, q.Domains)
 		}
 	}
 	return nil
@@ -336,7 +337,7 @@ func (f *File) Save(path string) error {
 func Update(path string, fn func(*File) error) error {
 	unlock, err := flock.Lock(path)
 	if err != nil {
-		return fmt.Errorf("%s をロックできない: %w", path, err)
+		return fmt.Errorf(i18n.T("%s をロックできない: %w", "cannot lock %s: %w"), path, err)
 	}
 	defer unlock()
 	f, err := LoadOrEmpty(path)

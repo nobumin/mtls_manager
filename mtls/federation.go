@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/nobumin/mtls_manager/internal/federation"
+	"github.com/nobumin/mtls_manager/internal/i18n"
 )
 
 // 連携版（設計 9-1）: 自分のルート CA（CAFile）に加えて、トラストバンドル（TrustBundleFile）の連携先のルート CA を、
@@ -71,7 +72,7 @@ func parseCerts(data []byte) ([]*x509.Certificate, error) {
 		out, data = append(out, c), rest
 	}
 	if len(out) == 0 {
-		return nil, errors.New("証明書が無い")
+		return nil, errors.New(i18n.T("証明書が無い", "no certificate"))
 	}
 	return out, nil
 }
@@ -88,7 +89,7 @@ func (t *trustStore) partners(now time.Time) []federation.TrustedPartner {
 	}
 	if !now.Before(t.accepted.Bundle.Expires) {
 		if !t.expired {
-			t.log.Error("mtls: トラストバンドルの有効期限が切れた。連携先のルート CA を外す（自分のルート CA は信頼し続ける）", "expires", t.accepted.Bundle.Expires)
+			t.log.Error(i18n.T("mtls: トラストバンドルの有効期限が切れた。連携先のルート CA を外す（自分のルート CA は信頼し続ける）", "mtls: the trust bundle has expired; removing partner root CAs (your own root CA stays trusted)"), "expires", t.accepted.Bundle.Expires)
 			t.expired = true
 		}
 		return nil
@@ -110,34 +111,34 @@ func (t *trustStore) reloadLocked(now time.Time) {
 		prev, b := t.accepted.Bundle, v.Bundle
 		switch {
 		case b.Epoch == prev.Epoch && b.Seq < prev.Seq:
-			err = fmt.Errorf("古いトラストバンドル（連番 %d < %d）", b.Seq, prev.Seq)
+			err = fmt.Errorf(i18n.T("古いトラストバンドル（連番 %d < %d）", "older trust bundle (sequence %d < %d)"), b.Seq, prev.Seq)
 		case b.Epoch != prev.Epoch && !b.IssuedAt.After(prev.IssuedAt):
-			err = fmt.Errorf("エポックが変わったのに、発行時刻（%s）が直前のもの（%s）より新しくない", b.IssuedAt, prev.IssuedAt)
+			err = fmt.Errorf(i18n.T("エポックが変わったのに、発行時刻（%s）が直前のもの（%s）より新しくない", "the epoch changed but the issue time (%s) is not newer than the previous one (%s)"), b.IssuedAt, prev.IssuedAt)
 		}
 	}
 	switch {
 	case err == nil:
 		if t.accepted == nil || v.Bundle.Epoch != t.accepted.Bundle.Epoch || v.Bundle.Seq != t.accepted.Bundle.Seq {
 			for _, d := range v.Dropped {
-				t.log.Error("mtls: トラストバンドルの連携先を外した", "reason", d)
+				t.log.Error(i18n.T("mtls: トラストバンドルの連携先を外した", "mtls: removed partners from the trust bundle"), "reason", d)
 			}
 			ids := make([]string, 0, len(v.Partners))
 			for _, p := range v.Partners {
 				ids = append(ids, p.ID)
 			}
-			t.log.Info("mtls: トラストバンドルを読み込んだ", "seq", v.Bundle.Seq, "partners", ids, "expires", v.Bundle.Expires)
+			t.log.Info(i18n.T("mtls: トラストバンドルを読み込んだ", "mtls: loaded the trust bundle"), "seq", v.Bundle.Seq, "partners", ids, "expires", v.Bundle.Expires)
 		}
 		t.accepted, t.lastErr, t.expired = v, "", false
 	case errors.Is(err, federation.ErrBundleExpired):
 		t.accepted = nil
 		if err.Error() != t.lastErr {
-			t.log.Error("mtls: トラストバンドルの有効期限が切れている。連携先のルート CA を信頼しない（mtls-agent を確認する）")
+			t.log.Error(i18n.T("mtls: トラストバンドルの有効期限が切れている。連携先のルート CA を信頼しない（mtls-agent を確認する）", "mtls: the trust bundle has expired; partner root CAs are not trusted (check mtls-agent)"))
 			t.lastErr = err.Error()
 		}
 	default:
 		// 不正なバンドルは使わず、直前に受け入れたものを有効期限まで使う。
 		if err.Error() != t.lastErr {
-			t.log.Error("mtls: トラストバンドルを使えない（直前のものを有効期限まで使う）", "err", err)
+			t.log.Error(i18n.T("mtls: トラストバンドルを使えない（直前のものを有効期限まで使う）", "mtls: cannot use the trust bundle (the previous one is used until it expires)"), "err", err)
 			t.lastErr = err.Error()
 		}
 	}
@@ -165,7 +166,7 @@ func (t *trustStore) load(now time.Time) (*federation.Verified, error) {
 func (t *trustStore) ownIntermediate() (*x509.Certificate, error) {
 	cert := t.src.Certificate()
 	if len(cert.Certificate) < 2 {
-		return nil, errors.New("CertFile に中間 CA が無い（連携版では fullchain を指定する）")
+		return nil, errors.New(i18n.T("CertFile に中間 CA が無い（連携版では fullchain を指定する）", "CertFile contains no intermediate CA (use the fullchain for federation)"))
 	}
 	leaf, err := x509.ParseCertificate(cert.Certificate[0])
 	if err != nil {
@@ -177,7 +178,7 @@ func (t *trustStore) ownIntermediate() (*x509.Certificate, error) {
 			return c, nil
 		}
 	}
-	return nil, errors.New("自分の証明書を発行した中間 CA が CertFile に無い")
+	return nil, errors.New(i18n.T("自分の証明書を発行した中間 CA が CertFile に無い", "the intermediate CA that issued your certificate is not in CertFile"))
 }
 
 // verifyConnection は、自分のルート CA または連携先のルート CA（範囲の内に限る）につながることを確かめる。
@@ -186,12 +187,12 @@ func (t *trustStore) verifyConnection(server bool, allowed []string) func(tls.Co
 	allowed = slices.Clone(allowed)
 	return func(cs tls.ConnectionState) error {
 		if len(cs.PeerCertificates) == 0 {
-			return errors.New("mtls: 相手が証明書を提示しなかった")
+			return errors.New(i18n.T("mtls: 相手が証明書を提示しなかった", "mtls: the peer presented no certificate"))
 		}
 		// クライアント側の ServerName は SNI に載せた名前で、IP アドレスに接続すると空になる（Go は IP を SNI に載せない）。
 		// 空のまま検証するとホスト名を確かめないことになるので、拒否する。
 		if !server && cs.ServerName == "" {
-			return errors.New("mtls: 連携版のクライアントは、ホスト名（DNS 名）で接続する（IP アドレスでの接続はホスト名を確かめられない。tls.Config.ServerName を指定する）")
+			return errors.New(i18n.T("mtls: 連携版のクライアントは、ホスト名（DNS 名）で接続する（IP アドレスでの接続はホスト名を確かめられない。tls.Config.ServerName を指定する）", "mtls: federation clients must connect by host name (DNS name); a connection by IP address cannot check the host name (set tls.Config.ServerName)"))
 		}
 		leaf := cs.PeerCertificates[0]
 		inters := x509.NewCertPool()
@@ -212,7 +213,7 @@ func (t *trustStore) verifyConnection(server bool, allowed []string) func(tls.Co
 		}
 		chains, err := leaf.Verify(opts)
 		if err != nil {
-			return fmt.Errorf("mtls: 相手の証明書を検証できない: %w", err)
+			return fmt.Errorf(i18n.T("mtls: 相手の証明書を検証できない: %w", "mtls: cannot verify the peer certificate: %w"), err)
 		}
 		var reasons []string
 		viaOwn, viaPartner := false, false
@@ -227,7 +228,7 @@ func (t *trustStore) verifyConnection(server bool, allowed []string) func(tls.Co
 					continue
 				}
 				if err := federation.CheckPeer(leaf, p.Domains); err != nil {
-					reasons = append(reasons, fmt.Sprintf("連携先 %s: %v", p.ID, err))
+					reasons = append(reasons, fmt.Sprintf(i18n.T("連携先 %s: %v", "partner %s: %v"), p.ID, err))
 					continue
 				}
 				viaPartner = true
@@ -236,9 +237,9 @@ func (t *trustStore) verifyConnection(server bool, allowed []string) func(tls.Co
 		accepted := viaOwn || viaPartner
 		if !accepted {
 			if len(reasons) == 0 {
-				reasons = append(reasons, "信頼するルート CA につながらない")
+				reasons = append(reasons, i18n.T("信頼するルート CA につながらない", "does not chain to a trusted root CA"))
 			}
-			return fmt.Errorf("mtls: 相手 %v を受け入れない（%s）", leaf.DNSNames, strings.Join(reasons, "、"))
+			return fmt.Errorf(i18n.T("mtls: 相手 %v を受け入れない（%s）", "mtls: rejecting peer %v (%s)"), leaf.DNSNames, strings.Join(reasons, "、"))
 		}
 		if len(allowed) > 0 {
 			return VerifyPeer(allowed)(cs)
@@ -246,7 +247,7 @@ func (t *trustStore) verifyConnection(server bool, allowed []string) func(tls.Co
 		// AllowAnyPeer（サーバ側で AllowedPeers が空）は、自分のルートにつながる相手だけに効く。
 		// 連携先の相手は、必ず AllowedPeers に一致すること（信頼が黙って組織の外へ広がらないように）。
 		if server && !viaOwn {
-			return fmt.Errorf("mtls: 連携先の相手 %v は AllowedPeers に一致しない（AllowAnyPeer は自分の組織の相手にだけ効く）", leaf.DNSNames)
+			return fmt.Errorf(i18n.T("mtls: 連携先の相手 %v は AllowedPeers に一致しない（AllowAnyPeer は自分の組織の相手にだけ効く）", "mtls: partner peer %v does not match AllowedPeers (AllowAnyPeer applies only to peers of your own organization)"), leaf.DNSNames)
 		}
 		return nil
 	}

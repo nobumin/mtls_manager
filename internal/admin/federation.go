@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/nobumin/mtls_manager/internal/federation"
+	"github.com/nobumin/mtls_manager/internal/i18n"
 	"github.com/nobumin/mtls_manager/mtls"
 )
 
@@ -81,17 +82,17 @@ func (s *Server) federationWarnings(now time.Time) []string {
 	}
 	f, err := federation.LoadOrEmpty(s.cfg.Federation.File)
 	if err != nil {
-		return []string{"連携情報のファイルを読めない: " + err.Error()}
+		return []string{i18n.T("連携情報のファイルを読めない: ", "cannot read the federation file: ") + err.Error()}
 	}
 	var out []string
 	for _, p := range f.Partners {
 		switch {
 		case p.State == federation.StateRequested:
-			out = append(out, fmt.Sprintf("連携先 %s の承認を待っている（申請者 %s とは別の管理者が「連携」画面で承認する）", p.ID, p.RequestedBy))
+			out = append(out, fmt.Sprintf(i18n.T("連携先 %s の承認を待っている（申請者 %s とは別の管理者が「連携」画面で承認する）", "partner %s is waiting for approval (an administrator other than the requester %s approves it on the Federation page)"), p.ID, p.RequestedBy))
 		case p.State == federation.StateActive && !now.Before(p.Expires):
-			out = append(out, fmt.Sprintf("連携先 %s の有効期限が切れた（トラストバンドルに入っていない）。照合と承認をやり直す", p.ID))
+			out = append(out, fmt.Sprintf(i18n.T("連携先 %s の有効期限が切れた（トラストバンドルに入っていない）。照合と承認をやり直す", "federation with partner %s has expired (it is not in the trust bundle); redo the comparison and approval"), p.ID))
 		case p.State == federation.StateActive && p.Expires.Sub(now) < fedWarnBefore:
-			out = append(out, fmt.Sprintf("連携先 %s の有効期限まで 30 日を切った（%s）。照合と承認をやり直す", p.ID, p.Expires.Local().Format(timeFormat)))
+			out = append(out, fmt.Sprintf(i18n.T("連携先 %s の有効期限まで 30 日を切った（%s）。照合と承認をやり直す", "federation with partner %s expires in less than 30 days (%s); redo the comparison and approval"), p.ID, p.Expires.Local().Format(timeFormat)))
 		}
 	}
 	return out
@@ -122,7 +123,7 @@ func (s *Server) checkFedPost(w http.ResponseWriter, r *http.Request, action str
 		return "", "", false
 	}
 	if !s.federationEnabled() {
-		http.Error(w, "連携版が有効でない（federation.file）", http.StatusNotFound)
+		http.Error(w, i18n.T("連携版が有効でない（federation.file）", "federation is not enabled (federation.file)"), http.StatusNotFound)
 		return "", "", false
 	}
 	id = strings.TrimSpace(r.PostForm.Get("id"))
@@ -146,11 +147,11 @@ func (s *Server) handleFedImport(w http.ResponseWriter, r *http.Request) {
 	if err := s.fedUpdate(func(f *federation.File) error {
 		return f.Import(id, rec, root, time.Now(), federation.ByAdmin(admin))
 	}); err != nil {
-		s.log.Warn("管理画面: 連携先を取り込めない", "category", "audit", "admin", admin, "partner", id, "err", err)
-		s.fail(w, r, "federation", http.StatusBadRequest, "取り込めない: "+err.Error())
+		s.log.Warn(i18n.T("管理画面: 連携先を取り込めない", "admin UI: cannot import a partner"), "category", "audit", "admin", admin, "partner", id, "err", err)
+		s.fail(w, r, "federation", http.StatusBadRequest, i18n.T("取り込めない: ", "cannot import: ")+err.Error())
 		return
 	}
-	s.log.Info("管理画面: 連携先を取り込んだ", "category", "audit", "admin", admin, "partner", id, "fingerprint", federation.Fingerprint(root), "declared_domains", rec.Domains)
+	s.log.Info(i18n.T("管理画面: 連携先を取り込んだ", "admin UI: imported a partner"), "category", "audit", "admin", admin, "partner", id, "fingerprint", federation.Fingerprint(root), "declared_domains", rec.Domains)
 	redirectDone(w, r, "/federation", "fed-imported", id)
 }
 
@@ -167,21 +168,21 @@ func (s *Server) handleFedRequest(w http.ResponseWriter, r *http.Request) {
 	if d := strings.TrimSpace(r.PostForm.Get("validity_days")); d != "" {
 		n, err := strconv.Atoi(d)
 		if err != nil || n < 1 || n > 730 {
-			s.fail(w, r, "federation", http.StatusBadRequest, "連携の有効期限は 1〜730 日")
+			s.fail(w, r, "federation", http.StatusBadRequest, i18n.T("連携の有効期限は 1〜730 日", "the federation expiry must be 1 to 730 days"))
 			return
 		}
 		o.Validity = time.Duration(n) * 24 * time.Hour
 	}
 	if len(o.ComparedWith) > 300 {
-		s.fail(w, r, "federation", http.StatusBadRequest, "照合した相手と経路は 300 文字まで")
+		s.fail(w, r, "federation", http.StatusBadRequest, i18n.T("照合した相手と経路は 300 文字まで", "who you compared with and how must be at most 300 characters"))
 		return
 	}
 	if err := s.fedUpdate(func(f *federation.File) error { return f.Request(id, o, s.fed.OwnScope(), time.Now()) }); err != nil {
-		s.log.Warn("管理画面: 連携の承認を申請できない", "category", "audit", "admin", admin, "partner", id, "err", err)
-		s.fail(w, r, "federation", http.StatusBadRequest, "申請できない: "+err.Error())
+		s.log.Warn(i18n.T("管理画面: 連携の承認を申請できない", "admin UI: cannot request federation approval"), "category", "audit", "admin", admin, "partner", id, "err", err)
+		s.fail(w, r, "federation", http.StatusBadRequest, i18n.T("申請できない: ", "cannot request: ")+err.Error())
 		return
 	}
-	s.log.Info("管理画面: 連携の承認を申請した", "category", "audit", "admin", admin, "partner", id, "compared_with", o.ComparedWith, "domains", o.Domains)
+	s.log.Info(i18n.T("管理画面: 連携の承認を申請した", "admin UI: requested federation approval"), "category", "audit", "admin", admin, "partner", id, "compared_with", o.ComparedWith, "domains", o.Domains)
 	redirectDone(w, r, "/federation", "fed-requested", id)
 }
 
@@ -191,18 +192,18 @@ func (s *Server) handleFedApprove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !requireConfirm(r) {
-		s.fail(w, r, "federation", http.StatusBadRequest, "確認のチェックを入れてから承認する")
+		s.fail(w, r, "federation", http.StatusBadRequest, i18n.T("確認のチェックを入れてから承認する", "tick the confirmation box before approving"))
 		return
 	}
 	err := s.fedUpdate(func(f *federation.File) error {
 		return f.Approve(id, r.PostForm.Get("fingerprint"), federation.ByAdmin(admin), s.fed.OwnScope(), time.Now())
 	})
 	if err != nil {
-		s.log.Warn("管理画面: 連携を承認できない", "category", "audit", "admin", admin, "partner", id, "err", err)
-		s.fail(w, r, "federation", http.StatusBadRequest, "承認できない: "+err.Error())
+		s.log.Warn(i18n.T("管理画面: 連携を承認できない", "admin UI: cannot approve a federation"), "category", "audit", "admin", admin, "partner", id, "err", err)
+		s.fail(w, r, "federation", http.StatusBadRequest, i18n.T("承認できない: ", "cannot approve: ")+err.Error())
 		return
 	}
-	s.log.Warn("管理画面: 連携を承認した（トラストバンドルに入る）", "category", "audit", "admin", admin, "partner", id)
+	s.log.Warn(i18n.T("管理画面: 連携を承認した（トラストバンドルに入る）", "admin UI: approved a federation (it enters the trust bundle)"), "category", "audit", "admin", admin, "partner", id)
 	redirectDone(w, r, "/federation", "fed-approved", id)
 }
 
@@ -212,20 +213,20 @@ func (s *Server) handleFedSuspend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !requireConfirm(r) {
-		s.fail(w, r, "federation", http.StatusBadRequest, "確認のチェックを入れてから停止する")
+		s.fail(w, r, "federation", http.StatusBadRequest, i18n.T("確認のチェックを入れてから停止する", "tick the confirmation box before suspending"))
 		return
 	}
 	reason := strings.TrimSpace(r.PostForm.Get("reason"))
 	if len(reason) > 300 {
-		s.fail(w, r, "federation", http.StatusBadRequest, "理由は 300 文字まで")
+		s.fail(w, r, "federation", http.StatusBadRequest, i18n.T("理由は 300 文字まで", "the reason must be at most 300 characters"))
 		return
 	}
 	if err := s.fedUpdate(func(f *federation.File) error { return f.Suspend(id, federation.ByAdmin(admin), reason, time.Now()) }); err != nil {
-		s.log.Warn("管理画面: 連携を停止できない", "category", "audit", "admin", admin, "partner", id, "err", err)
-		s.fail(w, r, "federation", http.StatusBadRequest, "停止できない: "+err.Error())
+		s.log.Warn(i18n.T("管理画面: 連携を停止できない", "admin UI: cannot suspend a federation"), "category", "audit", "admin", admin, "partner", id, "err", err)
+		s.fail(w, r, "federation", http.StatusBadRequest, i18n.T("停止できない: ", "cannot suspend: ")+err.Error())
 		return
 	}
-	s.log.Warn("管理画面: 連携を停止した", "category", "audit", "admin", admin, "partner", id, "reason", reason)
+	s.log.Warn(i18n.T("管理画面: 連携を停止した", "admin UI: suspended a federation"), "category", "audit", "admin", admin, "partner", id, "reason", reason)
 	redirectDone(w, r, "/federation", "fed-suspended", id)
 }
 
@@ -235,7 +236,7 @@ func (s *Server) handleFedRemove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !requireConfirm(r) {
-		s.fail(w, r, "federation", http.StatusBadRequest, "確認のチェックを入れてから消す")
+		s.fail(w, r, "federation", http.StatusBadRequest, i18n.T("確認のチェックを入れてから消す", "tick the confirmation box before removing"))
 		return
 	}
 	var removed federation.Partner
@@ -245,12 +246,12 @@ func (s *Server) handleFedRemove(w http.ResponseWriter, r *http.Request) {
 		}
 		return f.Remove(id)
 	}); err != nil {
-		s.log.Warn("管理画面: 連携先を消せない", "category", "audit", "admin", admin, "partner", id, "err", err)
-		s.fail(w, r, "federation", http.StatusBadRequest, "消せない: "+err.Error())
+		s.log.Warn(i18n.T("管理画面: 連携先を消せない", "admin UI: cannot remove a partner"), "category", "audit", "admin", admin, "partner", id, "err", err)
+		s.fail(w, r, "federation", http.StatusBadRequest, i18n.T("消せない: ", "cannot remove: ")+err.Error())
 		return
 	}
 	// 連携先の操作の記録はファイルから消えるので、要約を監査ログに残す。
-	s.log.Warn("管理画面: 連携先を消した", "category", "audit", "admin", admin, "partner", id,
+	s.log.Warn(i18n.T("管理画面: 連携先を消した", "admin UI: removed a partner"), "category", "audit", "admin", admin, "partner", id,
 		"fingerprint", removed.RootSHA256, "domains", removed.Domains, "state", removed.State,
 		"requested_by", removed.RequestedBy, "requested_via", removed.RequestedVia,
 		"approved_by", removed.ApprovedBy, "approved_via", removed.ApprovedVia, "compared_with", removed.ComparedWith)
@@ -287,11 +288,11 @@ func (s *Server) handleFedExport(w http.ResponseWriter, r *http.Request) {
 // checkFederationWritable は、管理画面から連携情報のファイルを書き換えられることを確かめる（起動時）。
 func checkFederationWritable(path string) error {
 	if err := checkWritable(filepath.Dir(path)); err != nil {
-		return fmt.Errorf("federation.file のディレクトリに mtls-ca が書き込める必要がある: %w", err)
+		return fmt.Errorf(i18n.T("federation.file のディレクトリに mtls-ca が書き込める必要がある: %w", "mtls-ca must be able to write to the directory of federation.file: %w"), err)
 	}
 	errCheck := errors.New("check")
 	if err := federation.Update(path, func(*federation.File) error { return errCheck }); !errors.Is(err, errCheck) {
-		return fmt.Errorf("mtls-ca が federation.file を更新できる必要がある: %w", err)
+		return fmt.Errorf(i18n.T("mtls-ca が federation.file を更新できる必要がある: %w", "mtls-ca must be able to update federation.file: %w"), err)
 	}
 	return nil
 }
@@ -314,11 +315,11 @@ func (s *Server) handleFedAnnounce(w http.ResponseWriter, r *http.Request) {
 	if err := s.fedUpdate(func(f *federation.File) error {
 		return f.ImportAnnouncement(id, compact, s.fed.OwnRoots(), federation.ByAdmin(admin), time.Now())
 	}); err != nil {
-		s.log.Warn("管理画面: ルート CA の入れ替えの予告を取り込めない", "category", "audit", "admin", admin, "partner", id, "err", err)
-		s.fail(w, r, "federation", http.StatusBadRequest, "予告を取り込めない: "+err.Error())
+		s.log.Warn(i18n.T("管理画面: ルート CA の入れ替えの予告を取り込めない", "admin UI: cannot import a root CA rotation announcement"), "category", "audit", "admin", admin, "partner", id, "err", err)
+		s.fail(w, r, "federation", http.StatusBadRequest, i18n.T("予告を取り込めない: ", "cannot import the announcement: ")+err.Error())
 		return
 	}
-	s.log.Info("管理画面: ルート CA の入れ替えの予告を取り込んだ", "category", "audit", "admin", admin, "partner", id)
+	s.log.Info(i18n.T("管理画面: ルート CA の入れ替えの予告を取り込んだ", "admin UI: imported a root CA rotation announcement"), "category", "audit", "admin", admin, "partner", id)
 	redirectDone(w, r, "/federation", "fed-announced", id)
 }
 
@@ -330,7 +331,7 @@ func (s *Server) handleFedNext(action string) http.HandlerFunc {
 			return
 		}
 		if !requireConfirm(r) {
-			s.fail(w, r, "federation", http.StatusBadRequest, "確認のチェックを入れてから操作する")
+			s.fail(w, r, "federation", http.StatusBadRequest, i18n.T("確認のチェックを入れてから操作する", "tick the confirmation box before proceeding"))
 			return
 		}
 		actor, now := federation.ByAdmin(admin), time.Now()
@@ -345,11 +346,11 @@ func (s *Server) handleFedNext(action string) http.HandlerFunc {
 			}
 		})
 		if err != nil {
-			s.log.Warn("管理画面: ルート CA の入れ替えの操作ができない", "category", "audit", "admin", admin, "partner", id, "action", action, "err", err)
-			s.fail(w, r, "federation", http.StatusBadRequest, "操作できない: "+err.Error())
+			s.log.Warn(i18n.T("管理画面: ルート CA の入れ替えの操作ができない", "admin UI: cannot perform a root CA rotation operation"), "category", "audit", "admin", admin, "partner", id, "action", action, "err", err)
+			s.fail(w, r, "federation", http.StatusBadRequest, i18n.T("操作できない: ", "cannot perform the operation: ")+err.Error())
 			return
 		}
-		s.log.Warn("管理画面: ルート CA の入れ替えの操作をした", "category", "audit", "admin", admin, "partner", id, "action", action)
+		s.log.Warn(i18n.T("管理画面: ルート CA の入れ替えの操作をした", "admin UI: performed a root CA rotation operation"), "category", "audit", "admin", admin, "partner", id, "action", action)
 		redirectDone(w, r, "/federation", "fed-"+action, id)
 	}
 }
