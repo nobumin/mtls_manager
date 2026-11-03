@@ -1,0 +1,68 @@
+# mtls_manager の playground（体験用）。プライベートネットワークに 3 台のコンテナを置く。
+#   mtls-manager … CA（ACME は 8443 番。ネットワークの中だけ）と管理画面（9443 番。PC の 127.0.0.1:9443 に公開）
+#   server-a     … Go のアプリ（mTLS。8443 番）
+#   server-b     … nginx（mTLS。8443 番）
+# PC から見えるのは管理画面だけ。server-a / server-b の 8443 番は公開しない。
+# どのコンテナも、止まったら起こし直す（restart）。init は、止まった子プロセス（mtls-agent など）を回収する。
+name: mtls-playground
+
+x-build: &build
+  context: ../..
+  dockerfile: docs/playground/Dockerfile
+
+services:
+  mtls-manager:
+    build: { <<: *build, target: manager }
+    restart: unless-stopped
+    init: true
+    hostname: ca
+    networks:
+      private:
+        aliases:
+          - ca.playground.internal
+          # 管理者の証明書を取るときの所有確認（http-01）をこのコンテナで受ける
+          - admin.admins.playground.internal
+    ports:
+      - "127.0.0.1:9443:9443"
+    volumes:
+      - manager-etc:/etc/mtls-ca
+      - manager-data:/var/lib/mtls-ca
+      - manager-admin:/etc/mtls-agent-admin
+      # 管理者の証明書（admin.p12）とルート CA の証明書を PC に渡す
+      - ./out:/out
+
+  server-a:
+    build: { <<: *build, target: server-a }
+    restart: unless-stopped
+    init: true
+    hostname: server-a
+    networks:
+      private:
+        aliases: [server-a.playground.internal]
+    volumes:
+      - server-a-etc:/etc/mtls-agent
+      - server-a-state:/var/lib/mtls-agent
+
+  server-b:
+    build: { <<: *build, target: server-b }
+    restart: unless-stopped
+    init: true
+    hostname: server-b
+    networks:
+      private:
+        aliases: [server-b.playground.internal]
+    volumes:
+      - server-b-etc:/etc/mtls-agent
+      - server-b-state:/var/lib/mtls-agent
+
+networks:
+  private: {}
+
+volumes:
+  manager-etc:
+  manager-data:
+  manager-admin:
+  server-a-etc:
+  server-a-state:
+  server-b-etc:
+  server-b-state:

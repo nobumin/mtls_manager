@@ -1,0 +1,31 @@
+{{define "content"}}{{with .Data}}
+{{range .Warnings}}<div class="alert">{{.}}</div>{{end}}
+
+<section class="cards">
+  <div class="card"><div class="num">{{.Valid}}</div><div class="label">有効な証明書</div></div>
+  <div class="card"><div class="num">{{.Revoked}}</div><div class="label">失効（期限内）</div></div>
+  <div class="card {{if .ExpiringSoon}}warn{{end}}"><div class="num">{{.ExpiringSoon}}</div><div class="label">更新が遅れている</div></div>
+  <div class="card {{if .Pending}}warn{{end}}"><div class="num">{{.Pending}}</div><div class="label">未完了</div></div>
+  <div class="card"><div class="num">{{.EABKeys}}</div><div class="label">EAB 鍵</div></div>
+  <div class="card"><div class="num">{{.Accounts}}</div><div class="label">アカウント</div></div>
+</section>
+
+<h2>CA の証明書</h2>
+<table>
+  <thead><tr><th>種類</th><th>名前</th><th>有効期限</th><th>残り</th><th>名前制約</th></tr></thead>
+  <tbody>
+  {{range .CA}}
+    <tr class="{{if .Warn}}row-warn{{end}}"><td>{{.Label}}</td><td>{{.Subject}}</td><td>{{fmtTime .NotAfter}}</td><td>{{.Remaining}}</td><td>{{if .Permitted}}{{join .Permitted ", "}}{{else}}—{{end}}</td></tr>
+  {{end}}
+  </tbody>
+</table>
+
+<h2>設定</h2>
+<table class="kv">
+  <tr><th>ACME の URL</th><td>{{.ExternalURL}}/acme/directory</td></tr>
+  <tr><th>発行してよいドメイン</th><td>{{join .AllowedDomains ", "}}</td></tr>
+  <tr><th>証明書の有効期間</th><td>{{.Validity}}</td></tr>
+  <tr><th>最後の発行</th><td>{{fmtTime .LastIssued}}</td></tr>
+  <tr><th>起動時刻</th><td>{{fmtTime .Started}}</td></tr>
+</table>
+{{end}}{{end}}

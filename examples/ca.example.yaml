@@ -1,0 +1,92 @@
+# mtls-ca の設定例 / Example configuration for mtls-ca
+#
+# このファイルを /etc/mtls-ca/config.yaml などリポジトリの外へコピーして編集する。
+# 秘密情報（鍵の中身）は書かず、ファイルのパスで指す。
+# Copy this file outside the repository (e.g. /etc/mtls-ca/config.yaml) and edit it.
+# Do not put secrets here; refer to key files by path.
+
+# 待ち受けアドレス / Listen address
+listen: ":8443"
+
+# クライアントから見た CA の URL（https://ホスト[:ポート]） / CA URL as seen by clients
+external_url: "https://ca.internal.example.com:8443"
+
+# CA 自身の TLS 証明書に載せる名前（省略時は external_url のホスト名）
+# Names on the CA's own TLS certificate (default: host of external_url)
+# hostnames: ["ca.internal.example.com"]
+
+# アカウント・発行履歴のデータベース / Database directory
+data_dir: "/var/lib/mtls-ca"
+
+root_cert: "/etc/mtls-ca/root.crt"
+intermediate_cert: "/etc/mtls-ca/intermediate.crt"
+intermediate_key: "/etc/mtls-ca/intermediate.key" # 0600 必須 / must be 0600
+
+# EAB 鍵ファイル（mtlsctl eab create で作成。0600 必須）/ EAB key file (must be 0600)
+eab_file: "/etc/mtls-ca/eab.json"
+
+# CA に接続できる送信元 / Source addresses allowed to connect
+allowed_client_cidrs:
+  - "10.0.0.0/8"
+
+policy:
+  # 発行してよいドメイン（自身とサブドメイン）/ Domains that may be issued (incl. subdomains)
+  allowed_domains:
+    - "internal.example.com"
+  # 1 枚の証明書に載せる名前の上限 / Max names per certificate
+  max_names_per_order: 10
+
+cert:
+  # 証明書の有効期間（10m〜90d）/ Certificate lifetime
+  validity: "24h"
+
+challenge:
+  types: ["http-01", "tls-alpn-01"]
+  http01_port: 80
+  tlsalpn01_port: 443
+  # 名前解決に使う DNS サーバ（省略時は OS の設定）/ DNS server for validation (default: OS resolver)
+  # resolver: "10.0.0.2:53"
+  timeout: "10s"
+  attempts: 3
+
+crl:
+  validity: "24h"
+
+log:
+  level: "info"  # debug / info / warn / error
+  format: "text" # text / json
+
+# 管理画面（Web 画面）。listen を指定すると有効になる。
+# Admin web UI. Enabled when listen is set.
+# admin:
+#   # ACME とは別のポート。localhost か管理用のサブネットのアドレスで待ち受ける
+#   # A port separate from ACME, bound to localhost or an admin-subnet address
+#   listen: "127.0.0.1:9443"
+#   # 管理画面に入れる管理者の証明書の名前（この CA が発行したクライアント証明書で mTLS ログイン）
+#   # Names of admin client certificates (mTLS login with certificates issued by this CA)
+#   # サーバとは別のサブドメインにする（その名前を完全一致で許可した EAB 鍵でだけ発行される）
+#   # Use a subdomain separate from the servers (issued only with EAB keys naming it exactly)
+#   allowed_clients:
+#     - "admin1.admins.internal.example.com"
+#   # 画面から変更（EAB 鍵の発行・取り消し、証明書の失効）ができる管理者。空なら全員が閲覧のみ。
+#   # 指定すると mtls-ca が eab_file を書き換えるので、eab_file は mtls-ca が書き込めるディレクトリに置く
+#   # （同梱の systemd ユニットなら /var/lib/mtls-ca/eab.json）。
+#   # Admins allowed to make changes (issue/revoke EAB keys, revoke certificates). Empty = everyone read-only.
+#   # mtls-ca then rewrites eab_file, so put it in a directory mtls-ca can write
+#   # (/var/lib/mtls-ca/eab.json with the bundled systemd unit).
+#   operators:
+#     - "admin1.admins.internal.example.com"
+#   # 管理画面に接続できる送信元 / Source addresses allowed to connect
+#   allowed_cidrs:
+#     - "10.0.100.0/24"
+#   # 画面で閲覧できる直近のログの件数 / Number of recent log entries viewable in the UI
+#   log_buffer: 5000
+
+# 連携版（別々の mtls-ca で管理するサーバとの mTLS）。file を指定すると有効になる。
+# 中間 CA に名前制約が必要（自分の範囲は名前制約から得る）。連携先は mtlsctl federation で管理する。
+# Federation (mTLS with servers managed by another mtls-ca). Enabled when file is set.
+# Requires name constraints on the intermediate (your scope comes from them). Manage partners with mtlsctl federation.
+# federation:
+#   file: "/etc/mtls-ca/federation.json"
+#   # トラストバンドルの有効期限（1h〜168h）/ Trust bundle expiry (1h–168h)
+#   bundle_validity: "48h"

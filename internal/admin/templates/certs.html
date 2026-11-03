@@ -1,0 +1,33 @@
+{{define "content"}}{{with .Data}}
+<form class="filter" method="get" action="/certs">
+  <input type="search" name="q" value="{{.Query}}" placeholder="名前・シリアル・EAB 鍵のメモで絞り込み">
+  <label><input type="checkbox" name="all" value="1" {{if .All}}checked{{end}}> 期限切れも表示</label>
+  <button type="submit">絞り込む</button>
+</form>
+<p class="muted">{{.Total}} 件{{if .Truncated}}（新しい順に 1000 件まで表示）{{end}}。期限切れから 7 日を過ぎた記録は自動で消える。{{if $.Operator}}失効は CRL に反映される（CRL を読むソフトにだけ効く）。{{end}}</p>
+<table>
+  <thead><tr><th>名前</th><th>状態</th><th>発行</th><th>有効期限</th><th>EAB 鍵</th><th>シリアル</th>{{if $.Operator}}<th>失効</th>{{end}}</tr></thead>
+  <tbody>
+  {{range .Rows}}
+    <tr><td>{{join .Names ", "}}</td><td><span class="badge {{.StatusCSS}}">{{.Status}}</span></td><td>{{fmtTime .Issued}}</td><td>{{fmtTime .NotAfter}}</td><td>{{.EABNote}}</td><td class="mono">{{.Serial}}</td>
+    {{if $.Operator}}<td>{{if or (eq .StatusCSS "ok") (eq .StatusCSS "warn")}}
+      <form class="inline" method="post" action="/certs/revoke" data-confirm="証明書 {{.Serial}}（{{join .Names ", "}}）を失効させる。元に戻せない。">
+        <input type="hidden" name="csrf" value="{{$.CSRF}}">
+        <input type="hidden" name="serial" value="{{.Serial}}">
+        <select name="reason">
+          <option value="0">指定なし</option>
+          <option value="1">鍵の漏えい</option>
+          <option value="3">所属の変更</option>
+          <option value="4">置き換え</option>
+          <option value="5">運用停止</option>
+        </select>
+        <label><input type="checkbox" name="confirm" value="yes" required> 確認</label>
+        <button type="submit" class="danger">失効</button>
+      </form>
+    {{end}}</td>{{end}}</tr>
+  {{else}}
+    <tr><td colspan="{{if $.Operator}}7{{else}}6{{end}}" class="muted">該当する証明書はない</td></tr>
+  {{end}}
+  </tbody>
+</table>
+{{end}}{{end}}
