@@ -12,9 +12,11 @@ quiet=false
 
 m() { docker compose exec -T mtls-manager "$@"; }
 fail() { printf '\033[31m%s\033[0m\n' "$*" >&2; exit 1; }
+# t 日本語 English: MTLS_LANG が en（en_US.UTF-8 なども可）なら英語を、それ以外は日本語を出す（プログラムと同じ決め方）。
+t() { case "$(printf '%s' "${MTLS_LANG:-}" | tr 'A-Z' 'a-z')" in en | en[_.@-]*) printf '%s' "$2" ;; *) printf '%s' "$1" ;; esac; }
 
-[ -n "$(docker compose ps -q --status running mtls-manager)" ] || fail "mtls-manager が動いていない。先に docker compose up -d を実行する"
-m test -f /etc/mtls-agent-admin/config.yaml || fail "まだ初期設定をしていない。先に ./setup.sh を実行する"
+[ -n "$(docker compose ps -q --status running mtls-manager)" ] || fail "$(t "mtls-manager が動いていない。先に docker compose up -d を実行する" "mtls-manager is not running; run docker compose up -d first")"
+m test -f /etc/mtls-agent-admin/config.yaml || fail "$(t "まだ初期設定をしていない。先に ./setup.sh を実行する" "not set up yet; run ./setup.sh first")"
 
 # -force: 有効期限の前でも取り直す（切れた後も同じ）
 m mtls-agent renew -force -config /etc/mtls-agent-admin/config.yaml
@@ -28,10 +30,21 @@ m cp /etc/mtls-agent-admin/tls/key.pem /out/admin.key
 m chown "$(id -u):$(id -g)" /out/admin.p12 /out/root.crt /out/admin.crt /out/admin.key
 
 $quiet && exit 0
-cat <<EOF
+expires=$(m openssl x509 -in /etc/mtls-agent-admin/tls/fullchain.pem -noout -enddate | cut -d= -f2)
+if [ "$(t ja en)" = en ]; then
+  cat <<EOF
+
+$(printf '\033[32mRenewed the administrator certificate.\033[0m')
+  Expires: $expires
+  Remove the old administrator certificate (admin.admins.playground.internal) from your browser / OS
+  and import the new out/admin.p12 (password: $P12_PASS) (see "4-2" in the README)
+EOF
+else
+  cat <<EOF
 
 $(printf '\033[32m管理者の証明書を取り直した。\033[0m')
-  有効期限: $(m openssl x509 -in /etc/mtls-agent-admin/tls/fullchain.pem -noout -enddate | cut -d= -f2)
+  有効期限: $expires
   ブラウザ・OS から古い管理者の証明書（admin.admins.playground.internal）を消し、
   新しい out/admin.p12（パスワード: $P12_PASS）を読み込み直す（手順は README の「4-2」）
 EOF
+fi

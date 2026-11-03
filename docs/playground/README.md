@@ -63,6 +63,9 @@ Docker だけで、**プライベートネットワークの 2 台のサーバ�
 
 ## 1. 起動する
 
+> プログラムとスクリプトの表示は既定で日本語です。英語にするには、以下の手順を実行するシェルで先に `export MTLS_LANG=en` を実行します
+> （コンテナとスクリプトが引き継ぎます）。
+
 ```bash
 git clone https://github.com/nobumin/mtls_manager.git
 ```
@@ -287,3 +290,4 @@ rm -f out/admin.p12 out/admin.crt out/admin.key out/root.crt
 | ブラウザで `ca.playground.internal` が見つからない | 4-1 の hosts を確かめる |
 | 環境を作り直した後、管理画面に入れない（証明書のエラー） | 作り直すとルート CA も新しくなる。ブラウザ・OS から古い管理者の証明書とルート CA を消し、新しい `out/admin.p12` と `out/root.crt` を読み込み直す |
 | `./setup.sh` が `Permission denied` | `chmod +x setup.sh check.sh renew-admin.sh` を実行する |
+| 表示を英語にしたい | 使うシェルで `export MTLS_LANG=en` を実行する。コンテナが起動済みなら、もう一度 `docker compose up -d` を実行して引き継がせる |

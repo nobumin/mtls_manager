@@ -15,6 +15,8 @@ Type=simple
 User=mtls-ca
 Group=mtls-ca
 ExecStart=/usr/local/bin/mtls-ca -config /etc/mtls-ca/config.yaml
+# 表示を英語にする（既定は日本語） / Show messages in English (default: Japanese)
+# Environment=MTLS_LANG=en
 Restart=on-failure
 RestartSec=5s
 
