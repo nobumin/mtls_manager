@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/nobumin/mtls_manager/internal/federation"
+	"github.com/nobumin/mtls_manager/internal/i18n"
 	"github.com/nobumin/mtls_manager/internal/pki"
 )
 
@@ -88,14 +89,14 @@ func (a *Agent) bundleURL() string {
 func (a *Agent) ownIntermediate() (*x509.Certificate, error) {
 	certs, err := pki.LoadCerts(a.cfg.Output.Cert)
 	if err != nil {
-		return nil, errors.New("証明書がまだ無い（取得の後にトラストバンドルを取得する）")
+		return nil, errors.New(i18n.T("証明書がまだ無い（取得の後にトラストバンドルを取得する）", "no certificate yet (the trust bundle is fetched after obtaining one)"))
 	}
 	for _, c := range a.intermediates(a.loadState()) {
 		if certs[0].CheckSignatureFrom(c) == nil {
 			return c, nil
 		}
 	}
-	return nil, errors.New("証明書を発行した中間 CA が分からない")
+	return nil, errors.New(i18n.T("証明書を発行した中間 CA が分からない", "cannot tell which intermediate CA issued the certificate"))
 }
 
 // verifyOptions はバンドルの検証の条件を、自分のルート（ca_root）と自分の中間 CA の名前制約から作る（CA の応答からは取らない）。
@@ -120,9 +121,9 @@ func (a *Agent) SyncBundle(ctx context.Context, now time.Time) error {
 	err := a.syncBundle(ctx, now)
 	st := a.loadBundleState()
 	if st != nil && !st.Expired && !now.Before(st.Expires) {
-		a.log.Error("トラストバンドルの有効期限が切れた。連携先をすべて外す（CA との通信を確認する）", "expires", st.Expires)
+		a.log.Error(i18n.T("トラストバンドルの有効期限が切れた。連携先をすべて外す（CA との通信を確認する）", "the trust bundle has expired; removing all partners (check connectivity to the CA)"), "expires", st.Expires)
 		if werr := a.writeFederation(nil, ""); werr != nil {
-			a.log.Error("連携先のファイルを書けない", "err", werr)
+			a.log.Error(i18n.T("連携先のファイルを書けない", "cannot write the partner files"), "err", werr)
 		} else {
 			st.Expired, st.HookPending = true, true
 			_ = a.saveBundleState(st)
@@ -132,10 +133,10 @@ func (a *Agent) SyncBundle(ctx context.Context, now time.Time) error {
 	a.retryBundleHook(ctx, now)
 	switch {
 	case err != nil && err.Error() != a.fed.lastErr:
-		a.log.Warn("トラストバンドルを更新できない（手元のものを有効期限まで使う）", "err", err)
+		a.log.Warn(i18n.T("トラストバンドルを更新できない（手元のものを有効期限まで使う）", "cannot update the trust bundle (the local one is used until it expires)"), "err", err)
 		a.fed.lastErr = err.Error()
 	case err == nil && a.fed.lastErr != "":
-		a.log.Info("トラストバンドルを取得できるようになった")
+		a.log.Info(i18n.T("トラストバンドルを取得できるようになった", "the trust bundle can be fetched again"))
 		a.fed.lastErr = ""
 	}
 	return err
@@ -155,7 +156,7 @@ func (a *Agent) syncBundle(ctx context.Context, now time.Time) error {
 	}
 	res, err := a.http.Do(req)
 	if err != nil {
-		return fmt.Errorf("トラストバンドルを取得できない: %w", err)
+		return fmt.Errorf(i18n.T("トラストバンドルを取得できない: %w", "cannot fetch the trust bundle: %w"), err)
 	}
 	defer res.Body.Close()
 	switch res.StatusCode {
@@ -163,7 +164,7 @@ func (a *Agent) syncBundle(ctx context.Context, now time.Time) error {
 		return nil
 	case http.StatusOK:
 	default:
-		return fmt.Errorf("トラストバンドルを取得できない（HTTP %d。CA の federation.file を確認する）", res.StatusCode)
+		return fmt.Errorf(i18n.T("トラストバンドルを取得できない（HTTP %d。CA の federation.file を確認する）", "cannot fetch the trust bundle (HTTP %d; check the CA's federation.file)"), res.StatusCode)
 	}
 	body, err := io.ReadAll(io.LimitReader(res.Body, 4<<20))
 	if err != nil {
@@ -172,7 +173,7 @@ func (a *Agent) syncBundle(ctx context.Context, now time.Time) error {
 	compact := strings.TrimSpace(string(body))
 	v, err := federation.Verify(compact, opts)
 	if err != nil {
-		return fmt.Errorf("トラストバンドルを受け入れない: %w", err)
+		return fmt.Errorf(i18n.T("トラストバンドルを受け入れない: %w", "rejecting the trust bundle: %w"), err)
 	}
 	b := v.Bundle
 	prev := a.loadBundleState()
@@ -182,15 +183,15 @@ func (a *Agent) syncBundle(ctx context.Context, now time.Time) error {
 			a.fed.etag = res.Header.Get("ETag")
 			return nil
 		case b.Epoch == prev.Epoch && b.Seq < prev.Seq:
-			return fmt.Errorf("古いトラストバンドル（連番 %d < %d）を受け入れない", b.Seq, prev.Seq)
+			return fmt.Errorf(i18n.T("古いトラストバンドル（連番 %d < %d）を受け入れない", "rejecting an older trust bundle (sequence %d < %d)"), b.Seq, prev.Seq)
 		case b.Epoch != prev.Epoch && !b.IssuedAt.After(prev.IssuedAt):
-			return fmt.Errorf("エポックが変わったのに、発行時刻（%s）が手元のもの（%s）より新しくない", b.IssuedAt, prev.IssuedAt)
+			return fmt.Errorf(i18n.T("エポックが変わったのに、発行時刻（%s）が手元のもの（%s）より新しくない", "the epoch changed but the issue time (%s) is not newer than the local one (%s)"), b.IssuedAt, prev.IssuedAt)
 		case b.Epoch != prev.Epoch:
-			a.log.Warn("トラストバンドルのエポックが変わった（CA の再起動・復旧）", "epoch", b.Epoch, "previous", prev.Epoch)
+			a.log.Warn(i18n.T("トラストバンドルのエポックが変わった（CA の再起動・復旧）", "the trust bundle epoch changed (CA restart or recovery)"), "epoch", b.Epoch, "previous", prev.Epoch)
 		}
 	}
 	for _, d := range v.Dropped {
-		a.log.Error("トラストバンドルの連携先を外した", "reason", d)
+		a.log.Error(i18n.T("トラストバンドルの連携先を外した", "removed partners from the trust bundle"), "reason", d)
 	}
 	if err := a.writeFederation(v.Partners, compact); err != nil {
 		return err
@@ -203,7 +204,7 @@ func (a *Agent) syncBundle(ctx context.Context, now time.Time) error {
 	for _, p := range v.Partners {
 		ids = append(ids, p.ID)
 	}
-	a.log.Info("トラストバンドルを更新した", "epoch", b.Epoch, "seq", b.Seq, "partners", ids, "expires", b.Expires)
+	a.log.Info(i18n.T("トラストバンドルを更新した", "updated the trust bundle"), "epoch", b.Epoch, "seq", b.Seq, "partners", ids, "expires", b.Expires)
 	a.fed.hookNext = time.Time{}
 	a.fed.hookBackoff.reset()
 	return nil
@@ -254,7 +255,7 @@ func (a *Agent) writeFederation(partners []federation.TrustedPartner, compact st
 		if err := writeFile(filepath.Join(dir, id+".domains"), nil, 0o644); err != nil {
 			return err
 		}
-		a.log.Warn("連携先を外した（どこにもつながらない PEM に置き換えた）", "partner", id)
+		a.log.Warn(i18n.T("連携先を外した（どこにもつながらない PEM に置き換えた）", "removed a partner (replaced with a PEM that chains to nothing)"), "partner", id)
 	}
 	return nil
 }
@@ -292,14 +293,14 @@ func (a *Agent) retryBundleHook(ctx context.Context, now time.Time) {
 		a.fed.hookNext = now.Add(wait)
 		st.HookFailed = true
 		_ = a.saveBundleState(st)
-		a.log.Error("トラストバンドルの更新後のコマンドが失敗した（再試行する。連携先の変更が反映されていない可能性がある）",
+		a.log.Error(i18n.T("トラストバンドルの更新後のコマンドが失敗した（再試行する。連携先の変更が反映されていない可能性がある）", "the post-bundle command failed (will retry; partner changes may not be applied yet)"),
 			"command", argv, "err", err, "output", truncate(buf.String(), 2000), "retry_in", wait.Round(time.Second))
 		return
 	}
 	st.HookPending, st.HookFailed = false, false
 	_ = a.saveBundleState(st)
 	a.fed.hookBackoff.reset()
-	a.log.Info("トラストバンドルの更新後のコマンドを実行した", "command", argv)
+	a.log.Info(i18n.T("トラストバンドルの更新後のコマンドを実行した", "ran the post-bundle command"), "command", argv)
 }
 
 // BundleProblem は連携版の状態の問題を返す（mtls-agent check で使う）。問題が無ければ空。
@@ -310,13 +311,13 @@ func (a *Agent) BundleProblem(now time.Time) string {
 	st := a.loadBundleState()
 	switch {
 	case st == nil:
-		return "トラストバンドルをまだ取得していない"
+		return i18n.T("トラストバンドルをまだ取得していない", "the trust bundle has not been fetched yet")
 	case !now.Before(st.Expires):
-		return "トラストバンドルの有効期限が切れている（連携先をすべて外している）"
+		return i18n.T("トラストバンドルの有効期限が切れている（連携先をすべて外している）", "the trust bundle has expired (all partners are removed)")
 	case st.HookFailed:
-		return "トラストバンドルの更新後のコマンドが失敗し続けている"
+		return i18n.T("トラストバンドルの更新後のコマンドが失敗し続けている", "the post-bundle command keeps failing")
 	case st.Expires.Sub(now) < 24*time.Hour:
-		return "トラストバンドルの有効期限が 1 日を切っている（CA から取得できていない）"
+		return i18n.T("トラストバンドルの有効期限が 1 日を切っている（CA から取得できていない）", "the trust bundle expires in less than a day (it cannot be fetched from the CA)")
 	}
 	return ""
 }
@@ -325,7 +326,7 @@ func (a *Agent) BundleProblem(now time.Time) string {
 func (a *Agent) BundleSummary() string {
 	st := a.loadBundleState()
 	if st == nil {
-		return "未取得"
+		return i18n.T("未取得", "not fetched")
 	}
 	var ids []string
 	if dir := a.cfg.Output.FederationDir; dir != "" {
@@ -339,5 +340,5 @@ func (a *Agent) BundleSummary() string {
 		}
 		slices.Sort(ids)
 	}
-	return fmt.Sprintf("連番 %d（エポック %.8s）、有効期限 %s、連携先 %v", st.Seq, st.Epoch, st.Expires.Local().Format(time.RFC3339), ids)
+	return fmt.Sprintf(i18n.T("連番 %d（エポック %.8s）、有効期限 %s、連携先 %v", "sequence %d (epoch %.8s), expires %s, partners %v"), st.Seq, st.Epoch, st.Expires.Local().Format(time.RFC3339), ids)
 }

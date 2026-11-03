@@ -12,6 +12,8 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+
+	"github.com/nobumin/mtls_manager/internal/i18n"
 )
 
 // 鍵の種類。設定ファイル・CLI のフラグで使う。
@@ -44,7 +46,7 @@ func GenerateKey(keyType string) (crypto.Signer, error) {
 		_, k, err := ed25519.GenerateKey(rand.Reader)
 		return k, err
 	default:
-		return nil, fmt.Errorf("未対応の鍵の種類 %q（%v のいずれか）", keyType, KeyTypes)
+		return nil, fmt.Errorf(i18n.T("未対応の鍵の種類 %q（%v のいずれか）", "unsupported key type %q (one of %v)"), keyType, KeyTypes)
 	}
 }
 
@@ -56,16 +58,16 @@ func CheckPublicKey(pub crypto.PublicKey) error {
 		case elliptic.P256(), elliptic.P384():
 			return nil
 		}
-		return errors.New("ECDSA は P-256 / P-384 のみ")
+		return errors.New(i18n.T("ECDSA は P-256 / P-384 のみ", "ECDSA supports only P-256 / P-384"))
 	case *rsa.PublicKey:
 		if n := k.N.BitLen(); n < 2048 || n > 8192 {
-			return fmt.Errorf("RSA は 2048〜8192 bit（%d bit）", n)
+			return fmt.Errorf(i18n.T("RSA は 2048〜8192 bit（%d bit）", "RSA must be 2048 to 8192 bits (%d bits)"), n)
 		}
 		return nil
 	case ed25519.PublicKey:
 		return nil
 	default:
-		return fmt.Errorf("未対応の鍵 %T", pub)
+		return fmt.Errorf(i18n.T("未対応の鍵 %T", "unsupported key %T"), pub)
 	}
 }
 
@@ -84,7 +86,7 @@ func ParsePrivateKeyPEM(data []byte) (crypto.Signer, error) {
 		var block *pem.Block
 		block, data = pem.Decode(data)
 		if block == nil {
-			return nil, errors.New("秘密鍵の PEM ブロックが見つからない")
+			return nil, errors.New(i18n.T("秘密鍵の PEM ブロックが見つからない", "no private key PEM block found"))
 		}
 		var (
 			k   any
@@ -98,7 +100,7 @@ func ParsePrivateKeyPEM(data []byte) (crypto.Signer, error) {
 		case "RSA PRIVATE KEY":
 			k, err = x509.ParsePKCS1PrivateKey(block.Bytes)
 		case "ENCRYPTED PRIVATE KEY":
-			return nil, errors.New("暗号化された秘密鍵は未対応（復号してから指定する）")
+			return nil, errors.New(i18n.T("暗号化された秘密鍵は未対応（復号してから指定する）", "encrypted private keys are not supported (decrypt the key first)"))
 		default:
 			continue
 		}
@@ -107,7 +109,7 @@ func ParsePrivateKeyPEM(data []byte) (crypto.Signer, error) {
 		}
 		s, ok := k.(crypto.Signer)
 		if !ok {
-			return nil, fmt.Errorf("署名に使えない鍵 %T", k)
+			return nil, fmt.Errorf(i18n.T("署名に使えない鍵 %T", "key %T cannot be used for signing"), k)
 		}
 		return s, nil
 	}

@@ -27,6 +27,7 @@ import (
 	"github.com/nobumin/mtls_manager/internal/config"
 	"github.com/nobumin/mtls_manager/internal/eab"
 	"github.com/nobumin/mtls_manager/internal/federation"
+	"github.com/nobumin/mtls_manager/internal/i18n"
 	"github.com/nobumin/mtls_manager/internal/pki"
 	"github.com/nobumin/mtls_manager/internal/store"
 )
@@ -87,7 +88,7 @@ type Server struct {
 // New は Server を作る。
 func New(o Options) (*Server, error) {
 	if o.Config == nil || o.Issuer == nil || o.DB == nil || o.EAB == nil {
-		return nil, errors.New("acmeserver: Config / Issuer / DB / EAB は必須")
+		return nil, errors.New(i18n.T("acmeserver: Config / Issuer / DB / EAB は必須", "acmeserver: Config / Issuer / DB / EAB are required"))
 	}
 	log := o.Logger
 	if log == nil {
@@ -100,9 +101,9 @@ func New(o Options) (*Server, error) {
 	}
 	// 前回の停止で確認中のまま残ったチャレンジを、クライアントがやり直せるよう pending に戻す。
 	if n, err := o.DB.ResetProcessingChallenges(); err != nil {
-		return nil, fmt.Errorf("確認中のチャレンジを戻せない: %w", err)
+		return nil, fmt.Errorf(i18n.T("確認中のチャレンジを戻せない: %w", "cannot reset challenges being validated: %w"), err)
 	} else if n > 0 {
-		log.Info("確認の途中で止まっていたチャレンジを pending に戻した", "count", n)
+		log.Info(i18n.T("確認の途中で止まっていたチャレンジを pending に戻した", "reset challenges interrupted during validation to pending"), "count", n)
 	}
 	warnAdminOverlaps(log, o.EAB, o.Config.Admin.AllowedClients)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -126,9 +127,9 @@ func (s *Server) RunCleanup(ctx context.Context, interval time.Duration) {
 	defer t.Stop()
 	for {
 		if n, err := s.db.Cleanup(time.Now(), retention); err != nil {
-			s.log.Error("期限切れレコードの削除に失敗", "err", err)
+			s.log.Error(i18n.T("期限切れレコードの削除に失敗", "failed to delete expired records"), "err", err)
 		} else if n > 0 {
-			s.log.Info("期限切れレコードを削除", "count", n)
+			s.log.Info(i18n.T("期限切れレコードを削除", "deleted expired records"), "count", n)
 		}
 		select {
 		case <-ctx.Done():
@@ -180,7 +181,7 @@ func (s *Server) restrictSource(next http.Handler) http.Handler {
 				}
 			}
 		}
-		s.log.Warn("許可されていない送信元からの接続を拒否", "remote", r.RemoteAddr)
+		s.log.Warn(i18n.T("許可されていない送信元からの接続を拒否", "refused a connection from a disallowed source"), "remote", r.RemoteAddr)
 		http.Error(w, "forbidden", http.StatusForbidden)
 	})
 }
@@ -254,7 +255,7 @@ func (s *Server) writeProblem(w http.ResponseWriter, r *http.Request, p *problem
 	if p.Status >= 500 {
 		lvl = slog.LevelError
 	}
-	s.log.Log(r.Context(), lvl, "ACME エラー", "path", r.URL.Path, "type", p.Type, "detail", p.Detail, "remote", r.RemoteAddr)
+	s.log.Log(r.Context(), lvl, i18n.T("ACME エラー", "ACME error"), "path", r.URL.Path, "type", p.Type, "detail", p.Detail, "remote", r.RemoteAddr)
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(p.Status)
 	_ = json.NewEncoder(w).Encode(p)
@@ -284,7 +285,7 @@ func (s *Server) handleNewNonce(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCRL(w http.ResponseWriter, r *http.Request) {
 	der, err := s.currentCRL()
 	if err != nil {
-		s.log.Error("CRL を作れない", "err", err)
+		s.log.Error(i18n.T("CRL を作れない", "cannot build the CRL"), "err", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
@@ -340,7 +341,7 @@ func warnAdminOverlaps(log *slog.Logger, store *eab.Store, admins []string) {
 	}
 	for _, k := range keys {
 		if ov := k.WildcardOverlaps(admins); len(ov) > 0 {
-			log.Warn("EAB 鍵のワイルドカードが管理者の名前と重なっている（この鍵では管理者の名前の証明書は発行しない。管理者の名前はサーバと別のサブドメインにする）",
+			log.Warn(i18n.T("EAB 鍵のワイルドカードが管理者の名前と重なっている（この鍵では管理者の名前の証明書は発行しない。管理者の名前はサーバと別のサブドメインにする）", "an EAB key wildcard overlaps an administrator name (this key will not issue certificates for administrator names; put administrator names in a subdomain separate from servers)"),
 				"eab_kid", k.KID, "note", k.Note, "patterns", ov, "admin_clients", admins)
 		}
 	}

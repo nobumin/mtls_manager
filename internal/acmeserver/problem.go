@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/nobumin/mtls_manager/internal/i18n"
 	"github.com/nobumin/mtls_manager/internal/store"
 )
 
@@ -31,7 +32,7 @@ func unauthorized(format string, args ...any) *problem {
 }
 
 func notFound(what string) *problem {
-	return newProblem(http.StatusNotFound, "malformed", "%s が見つからない", what)
+	return newProblem(http.StatusNotFound, "malformed", i18n.T("%s が見つからない", "%s not found"), what)
 }
 
 func serverInternal(format string, args ...any) *problem {

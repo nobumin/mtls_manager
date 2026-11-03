@@ -14,6 +14,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/nobumin/mtls_manager/internal/i18n"
 )
 
 // Normalize は小文字化し、末尾のドットを取り除く。
@@ -25,13 +27,13 @@ func Normalize(name string) string {
 // name は Normalize 済みであること。
 func ValidateHostname(name string) error {
 	if name == "" {
-		return errors.New("空の名前")
+		return errors.New(i18n.T("空の名前", "empty name"))
 	}
 	if len(name) > 253 {
-		return fmt.Errorf("%q: 253 文字を超えている", name)
+		return fmt.Errorf(i18n.T("%q: 253 文字を超えている", "%q: longer than 253 characters"), name)
 	}
 	if !strings.Contains(name, ".") {
-		return fmt.Errorf("%q: FQDN（ドットを含む名前）を指定する", name)
+		return fmt.Errorf(i18n.T("%q: FQDN（ドットを含む名前）を指定する", "%q: specify an FQDN (a name containing a dot)"), name)
 	}
 	return ValidateDomain(name)
 }
@@ -40,7 +42,7 @@ func ValidateHostname(name string) error {
 // 名前制約・発行してよいドメインの指定に使う。name は Normalize 済みであること。
 func ValidateDomain(name string) error {
 	if name == "" || len(name) > 253 {
-		return fmt.Errorf("%q: 長さが不正", name)
+		return fmt.Errorf(i18n.T("%q: 長さが不正", "%q: invalid length"), name)
 	}
 	labels := strings.Split(name, ".")
 	for _, l := range labels {
@@ -50,25 +52,25 @@ func ValidateDomain(name string) error {
 	}
 	// 最上位のラベルが数字だけの名前は IP アドレスと紛らわしいので受け付けない（RFC 1123 §2.1）。
 	if strings.Trim(labels[len(labels)-1], "0123456789") == "" {
-		return fmt.Errorf("%q: 最上位のラベルが数字だけの名前は使えない", name)
+		return fmt.Errorf(i18n.T("%q: 最上位のラベルが数字だけの名前は使えない", "%q: names whose top-level label is all digits cannot be used"), name)
 	}
 	return nil
 }
 
 func validateLabel(l string) error {
 	if l == "" {
-		return errors.New("空のラベルがある")
+		return errors.New(i18n.T("空のラベルがある", "contains an empty label"))
 	}
 	if len(l) > 63 {
-		return errors.New("63 文字を超えるラベルがある")
+		return errors.New(i18n.T("63 文字を超えるラベルがある", "contains a label longer than 63 characters"))
 	}
 	if l[0] == '-' || l[len(l)-1] == '-' {
-		return errors.New("ラベルの先頭・末尾にハイフンは使えない")
+		return errors.New(i18n.T("ラベルの先頭・末尾にハイフンは使えない", "labels cannot start or end with a hyphen"))
 	}
 	for i := 0; i < len(l); i++ {
 		c := l[i]
 		if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-') {
-			return fmt.Errorf("使えない文字 %q がある（英小文字・数字・ハイフンのみ）", c)
+			return fmt.Errorf(i18n.T("使えない文字 %q がある（英小文字・数字・ハイフンのみ）", "contains an invalid character %q (only lowercase letters, digits and hyphens)"), c)
 		}
 	}
 	return nil
@@ -80,7 +82,7 @@ func ValidatePattern(p string) error {
 		return ValidateHostname(rest)
 	}
 	if strings.Contains(p, "*") {
-		return fmt.Errorf("%q: ワイルドカードは先頭の \"*.\" のみ使える", p)
+		return fmt.Errorf(i18n.T("%q: ワイルドカードは先頭の \"*.\" のみ使える", "%q: a wildcard is only allowed as a leading \"*.\""), p)
 	}
 	return ValidateHostname(p)
 }

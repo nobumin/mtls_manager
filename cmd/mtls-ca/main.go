@@ -24,6 +24,7 @@ import (
 	"github.com/nobumin/mtls_manager/internal/config"
 	"github.com/nobumin/mtls_manager/internal/eab"
 	"github.com/nobumin/mtls_manager/internal/federation"
+	"github.com/nobumin/mtls_manager/internal/i18n"
 	"github.com/nobumin/mtls_manager/internal/logbuf"
 	"github.com/nobumin/mtls_manager/internal/pki"
 	"github.com/nobumin/mtls_manager/internal/store"
@@ -45,8 +46,8 @@ func main() {
 			return
 		}
 	}
-	configPath := flag.String("config", "/etc/mtls-ca/config.yaml", "設定ファイル")
-	showVersion := flag.Bool("version", false, "バージョンを表示して終了")
+	configPath := flag.String("config", "/etc/mtls-ca/config.yaml", i18n.T("設定ファイル", "configuration file"))
+	showVersion := flag.Bool("version", false, i18n.T("バージョンを表示して終了", "print the version and exit"))
 	flag.Parse()
 	if *showVersion {
 		fmt.Println("mtls-ca", version.Version)
@@ -72,21 +73,24 @@ func run(configPath string) error {
 		handler = logs.Handler(handler)
 	}
 	log := slog.New(handler)
+	if w := i18n.InvalidEnvWarning(); w != "" {
+		log.Warn(w)
+	}
 
 	iss, err := pki.LoadIssuer(cfg.IntermediateCert, cfg.IntermediateKey, cfg.RootCert)
 	if err != nil {
 		return err
 	}
 	if len(iss.Cert.PermittedDNSDomains) == 0 {
-		log.Warn("中間 CA に名前制約がない。mtlsctl intermediate sign -permitted-domain で作り直すことを推奨する")
+		log.Warn(i18n.T("中間 CA に名前制約がない。mtlsctl intermediate sign -permitted-domain で作り直すことを推奨する", "the intermediate CA has no name constraints; recreating it with mtlsctl intermediate sign -permitted-domain is recommended"))
 	}
 	for _, d := range cfg.Policy.AllowedDomains {
 		if !iss.Permits(d) {
-			return fmt.Errorf("policy.allowed_domains の %q が中間 CA の名前制約 %v の範囲外", d, iss.Cert.PermittedDNSDomains)
+			return fmt.Errorf(i18n.T("policy.allowed_domains の %q が中間 CA の名前制約 %v の範囲外", "%q in policy.allowed_domains is outside the intermediate CA's name constraints %v"), d, iss.Cert.PermittedDNSDomains)
 		}
 	}
 	if len(cfg.AllowedClientCIDRs) == 0 {
-		log.Warn("allowed_client_cidrs が空のため、どこからでも CA に接続できる")
+		log.Warn(i18n.T("allowed_client_cidrs が空のため、どこからでも CA に接続できる", "allowed_client_cidrs is empty, so the CA accepts connections from anywhere"))
 	}
 
 	db, err := store.Open(cfg.DataDir)
@@ -96,7 +100,7 @@ func run(configPath string) error {
 	defer db.Close()
 	eabStore, err := eab.NewStore(cfg.EABFile)
 	if err != nil {
-		return fmt.Errorf("eab_file: %w（mtlsctl eab create で作成する）", err)
+		return fmt.Errorf(i18n.T("eab_file: %w（mtlsctl eab create で作成する）", "eab_file: %w (create it with mtlsctl eab create)"), err)
 	}
 	var fed *federation.Builder
 	if cfg.Federation.File != "" {
@@ -154,12 +158,12 @@ func run(configPath string) error {
 		}
 		go func() { errc <- as.ListenAndServeTLS("", "") }()
 		servers = append(servers, as)
-		log.Info("管理画面を起動した", "listen", cfg.Admin.Listen, "allowed_clients", cfg.Admin.AllowedClients)
+		log.Info(i18n.T("管理画面を起動した", "admin UI started"), "listen", cfg.Admin.Listen, "allowed_clients", cfg.Admin.AllowedClients)
 		if len(cfg.Admin.AllowedCIDRs) == 0 && !isLoopback(cfg.Admin.Listen) {
-			log.Warn("admin.allowed_cidrs が空で、管理画面が localhost 以外で待ち受けている。管理用のサブネットに限ることを推奨する")
+			log.Warn(i18n.T("admin.allowed_cidrs が空で、管理画面が localhost 以外で待ち受けている。管理用のサブネットに限ることを推奨する", "admin.allowed_cidrs is empty and the admin UI listens on a non-localhost address; restricting it to the admin subnet is recommended"))
 		}
 	}
-	log.Info("mtls-ca を起動した", "version", version.Version, "listen", cfg.Listen, "directory", cfg.ExternalURL+"/acme/directory",
+	log.Info(i18n.T("mtls-ca を起動した", "mtls-ca started"), "version", version.Version, "listen", cfg.Listen, "directory", cfg.ExternalURL+"/acme/directory",
 		"allowed_domains", cfg.Policy.AllowedDomains, "cert_validity", cfg.Cert.Validity.D())
 
 	select {
@@ -168,7 +172,7 @@ func run(configPath string) error {
 			return err
 		}
 	case <-ctx.Done():
-		log.Info("停止する")
+		log.Info(i18n.T("停止する", "stopping"))
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		for _, s := range servers {
@@ -186,9 +190,9 @@ func watchIntermediate(ctx context.Context, log *slog.Logger, iss *pki.Issuer, v
 	for {
 		switch remaining := time.Until(iss.Cert.NotAfter); {
 		case remaining < validity/2:
-			log.Error("中間 CA の有効期限が近いため、証明書を発行できない。中間 CA を更新すること", "not_after", iss.Cert.NotAfter)
+			log.Error(i18n.T("中間 CA の有効期限が近いため、証明書を発行できない。中間 CA を更新すること", "the intermediate CA expires soon, so certificates cannot be issued; rotate the intermediate CA"), "not_after", iss.Cert.NotAfter)
 		case remaining < 30*24*time.Hour:
-			log.Warn("中間 CA の有効期限が近い。中間 CA を更新すること", "not_after", iss.Cert.NotAfter, "remaining", remaining.Round(time.Hour))
+			log.Warn(i18n.T("中間 CA の有効期限が近い。中間 CA を更新すること", "the intermediate CA expires soon; rotate the intermediate CA"), "not_after", iss.Cert.NotAfter, "remaining", remaining.Round(time.Hour))
 		}
 		select {
 		case <-ctx.Done():
@@ -224,11 +228,11 @@ func newFederation(cfg *config.CA, iss *pki.Issuer, log *slog.Logger) (*federati
 	}
 	b, err := federation.NewBuilder(st, iss.Cert, iss.Key, roots, cfg.Federation.BundleValidity.D(), log)
 	if err != nil {
-		return nil, fmt.Errorf("連携版を使えない: %w", err)
+		return nil, fmt.Errorf(i18n.T("連携版を使えない: %w", "cannot enable federation: %w"), err)
 	}
 	if _, _, err := b.Current(time.Now()); err != nil {
 		return nil, err
 	}
-	log.Info("連携版を有効にした", "federation_file", cfg.Federation.File, "own_scope", b.OwnScope(), "bundle_validity", cfg.Federation.BundleValidity.D())
+	log.Info(i18n.T("連携版を有効にした", "federation enabled"), "federation_file", cfg.Federation.File, "own_scope", b.OwnScope(), "bundle_validity", cfg.Federation.BundleValidity.D())
 	return b, nil
 }

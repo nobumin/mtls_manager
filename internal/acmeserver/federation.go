@@ -3,6 +3,8 @@ package acmeserver
 import (
 	"net/http"
 	"time"
+
+	"github.com/nobumin/mtls_manager/internal/i18n"
 )
 
 // pathFederationBundle はトラストバンドル（連携版）の配布先。
@@ -17,8 +19,8 @@ func (s *Server) handleFederationBundle(w http.ResponseWriter, r *http.Request) 
 	}
 	compact, etag, err := s.fed.Current(time.Now())
 	if err != nil {
-		s.log.Error("トラストバンドルを作れない", "err", err)
-		http.Error(w, "トラストバンドルを作れない", http.StatusInternalServerError)
+		s.log.Error(i18n.T("トラストバンドルを作れない", "cannot build the trust bundle"), "err", err)
+		http.Error(w, i18n.T("トラストバンドルを作れない", "cannot build the trust bundle"), http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("ETag", etag)

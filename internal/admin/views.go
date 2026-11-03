@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/nobumin/mtls_manager/internal/eab"
+	"github.com/nobumin/mtls_manager/internal/i18n"
 	"github.com/nobumin/mtls_manager/internal/logbuf"
 	"github.com/nobumin/mtls_manager/internal/store"
 )
@@ -27,23 +28,26 @@ var funcs = template.FuncMap{
 		return t.Local().Format(timeFormat)
 	},
 	"join": strings.Join,
+	// t は文言を現在の言語で返す（日本語, 英語）。lang は HTML の lang 属性に使う。
+	"t":    i18n.T,
+	"lang": func() string { return i18n.Current().String() },
 }
 
 // remaining は残り期間を「12 日 3 時間」のような表記にする。
 func remaining(until time.Time, now time.Time) string {
 	d := until.Sub(now)
 	if d <= 0 {
-		return "期限切れ"
+		return i18n.T("期限切れ", "expired")
 	}
 	days := int(d.Hours()) / 24
 	hours := int(d.Hours()) % 24
 	switch {
 	case days > 0:
-		return fmt.Sprintf("%d 日 %d 時間", days, hours)
+		return fmt.Sprintf(i18n.T("%d 日 %d 時間", "%dd %dh"), days, hours)
 	case hours > 0:
-		return fmt.Sprintf("%d 時間 %d 分", hours, int(d.Minutes())%60)
+		return fmt.Sprintf(i18n.T("%d 時間 %d 分", "%dh %dm"), hours, int(d.Minutes())%60)
 	default:
-		return fmt.Sprintf("%d 分", int(d.Minutes()))
+		return fmt.Sprintf(i18n.T("%d 分", "%dm"), int(d.Minutes()))
 	}
 }
 
@@ -96,19 +100,19 @@ func (s *Server) dashboardData(*http.Request) (any, error) {
 	validity := s.cfg.Cert.Validity.D()
 	v := dashboardView{
 		CA: []caCertView{
-			newCACertView("ルート CA", s.issuer.Root, now, 365*24*time.Hour),
-			newCACertView("中間 CA", s.issuer.Cert, now, 30*24*time.Hour),
+			newCACertView(i18n.T("ルート CA", "Root CA"), s.issuer.Root, now, 365*24*time.Hour),
+			newCACertView(i18n.T("中間 CA", "Intermediate CA"), s.issuer.Cert, now, 30*24*time.Hour),
 		},
 		AllowedDomains: s.cfg.Policy.AllowedDomains, Validity: validity, ExternalURL: s.cfg.ExternalURL,
 		Started: s.started, Accounts: len(accounts), EABKeys: len(keys),
 	}
 	if rem := s.issuer.Cert.NotAfter.Sub(now); rem < validity/2 {
-		v.Warnings = append(v.Warnings, "中間 CA の有効期限が近いため、証明書を発行できない。中間 CA を更新すること")
+		v.Warnings = append(v.Warnings, i18n.T("中間 CA の有効期限が近いため、証明書を発行できない。中間 CA を更新すること", "the intermediate CA expires soon, so certificates cannot be issued; rotate the intermediate CA"))
 	} else if rem < 30*24*time.Hour {
-		v.Warnings = append(v.Warnings, "中間 CA の有効期限まで 30 日を切った。中間 CA を更新すること")
+		v.Warnings = append(v.Warnings, i18n.T("中間 CA の有効期限まで 30 日を切った。中間 CA を更新すること", "the intermediate CA expires in less than 30 days; rotate the intermediate CA"))
 	}
 	if s.issuer.Root.NotAfter.Sub(now) < 365*24*time.Hour {
-		v.Warnings = append(v.Warnings, "ルート CA の有効期限まで 1 年を切った。ルート CA の入れ替えを計画すること")
+		v.Warnings = append(v.Warnings, i18n.T("ルート CA の有効期限まで 1 年を切った。ルート CA の入れ替えを計画すること", "the root CA expires in less than a year; plan the root CA rotation"))
 	}
 	v.Warnings = append(v.Warnings, s.federationWarnings(now)...)
 	// 名前の組ごとに最新の有効な証明書を見て、更新が遅れているものを数える。
@@ -141,7 +145,7 @@ func (s *Server) dashboardData(*http.Request) (any, error) {
 		}
 	}
 	if v.ExpiringSoon > 0 {
-		v.Warnings = append(v.Warnings, fmt.Sprintf("更新が遅れている証明書が %d 件ある（有効期間の残りが 1/3 を切ったまま、次の証明書が発行されていない）。該当するサーバの mtls-agent を確認すること", v.ExpiringSoon))
+		v.Warnings = append(v.Warnings, fmt.Sprintf(i18n.T("更新が遅れている証明書が %d 件ある（有効期間の残りが 1/3 を切ったまま、次の証明書が発行されていない）。該当するサーバの mtls-agent を確認すること", "%d certificate(s) are overdue for renewal (less than 1/3 of the lifetime left with no newer certificate issued); check mtls-agent on those servers"), v.ExpiringSoon))
 	}
 	return v, nil
 }
@@ -185,13 +189,13 @@ func (s *Server) certsData(r *http.Request) (any, error) {
 		row := certRow{Serial: c.Serial, Names: c.Names, Issued: c.Issued(), NotAfter: c.NotAfter, Account: c.AccountID, EABNote: notes[c.AccountID]}
 		switch {
 		case c.Pending && !c.Revoked:
-			row.Status, row.StatusCSS = "未完了", "warn"
+			row.Status, row.StatusCSS = i18n.T("未完了", "incomplete"), "warn"
 		case c.Revoked:
-			row.Status, row.StatusCSS = "失効 "+c.RevokedAt.Local().Format(timeFormat), "bad"
+			row.Status, row.StatusCSS = i18n.T("失効 ", "revoked ")+c.RevokedAt.Local().Format(timeFormat), "bad"
 		case !now.Before(c.NotAfter):
-			row.Status, row.StatusCSS = "期限切れ", "muted"
+			row.Status, row.StatusCSS = i18n.T("期限切れ", "expired"), "muted"
 		default:
-			row.Status, row.StatusCSS = "有効（残り "+remaining(c.NotAfter, now)+"）", "ok"
+			row.Status, row.StatusCSS = fmt.Sprintf(i18n.T("有効（残り %s）", "valid (%s left)"), remaining(c.NotAfter, now)), "ok"
 		}
 		if !all && row.StatusCSS == "muted" {
 			continue
@@ -228,7 +232,7 @@ func (s *Server) accountNotes() (map[string]string, error) {
 		k, ok := byKID[a.EABKeyID]
 		switch {
 		case !ok:
-			out[a.ID] = a.EABKeyID + "（取り消し済み）"
+			out[a.ID] = a.EABKeyID + i18n.T("（取り消し済み）", " (revoked)")
 		case k.Note != "":
 			out[a.ID] = k.Note
 		default:
@@ -302,7 +306,7 @@ func (s *Server) handleLogsAPI(w http.ResponseWriter, r *http.Request) {
 	var level slog.Level
 	if l := q.Get("level"); l != "" {
 		if err := level.UnmarshalText([]byte(l)); err != nil {
-			http.Error(w, "level が不正", http.StatusBadRequest)
+			http.Error(w, i18n.T("level が不正", "invalid level"), http.StatusBadRequest)
 			return
 		}
 	} else {

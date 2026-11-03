@@ -15,6 +15,7 @@ import (
 	jose "github.com/go-jose/go-jose/v4"
 
 	"github.com/nobumin/mtls_manager/internal/eab"
+	"github.com/nobumin/mtls_manager/internal/i18n"
 	"github.com/nobumin/mtls_manager/internal/store"
 )
 
@@ -39,43 +40,43 @@ type request struct {
 func (s *Server) verify(r *http.Request, wantJWK bool) (*request, *problem) {
 	mt, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || mt != "application/jose+json" {
-		return nil, newProblem(http.StatusUnsupportedMediaType, "malformed", "Content-Type は application/jose+json")
+		return nil, newProblem(http.StatusUnsupportedMediaType, "malformed", "%s", i18n.T("Content-Type は application/jose+json", "Content-Type must be application/jose+json"))
 	}
 	body, err := io.ReadAll(http.MaxBytesReader(nil, r.Body, maxBodyBytes))
 	if err != nil {
-		return nil, malformed("リクエストを読めない: %v", err)
+		return nil, malformed(i18n.T("リクエストを読めない: %v", "cannot read the request: %v"), err)
 	}
 	if !strings.HasPrefix(strings.TrimSpace(string(body)), "{") {
-		return nil, malformed("JWS は Flattened JSON 形式にする")
+		return nil, malformed("%s", i18n.T("JWS は Flattened JSON 形式にする", "the JWS must use the Flattened JSON serialization"))
 	}
 	obj, err := jose.ParseSigned(string(body), accountAlgs)
 	if err != nil {
-		return nil, newProblem(http.StatusBadRequest, "badSignatureAlgorithm", "JWS を解釈できない: %v", err)
+		return nil, newProblem(http.StatusBadRequest, "badSignatureAlgorithm", i18n.T("JWS を解釈できない: %v", "cannot parse the JWS: %v"), err)
 	}
 	if len(obj.Signatures) != 1 {
-		return nil, malformed("署名は 1 つだけにする")
+		return nil, malformed("%s", i18n.T("署名は 1 つだけにする", "exactly one signature is required"))
 	}
 	sig := obj.Signatures[0]
 	if !emptyHeader(sig.Unprotected) {
-		return nil, malformed("保護されていないヘッダは使えない")
+		return nil, malformed("%s", i18n.T("保護されていないヘッダは使えない", "unprotected headers are not allowed"))
 	}
 	h := sig.Protected
 
 	if h.Nonce == "" || !s.nonces.consume(h.Nonce) {
-		return nil, newProblem(http.StatusBadRequest, "badNonce", "nonce が無効")
+		return nil, newProblem(http.StatusBadRequest, "badNonce", "%s", i18n.T("nonce が無効", "invalid nonce"))
 	}
 	if u, _ := h.ExtraHeaders["url"].(string); u != s.url(r.URL.Path) {
-		return nil, unauthorized("url ヘッダがリクエスト先と一致しない")
+		return nil, unauthorized("%s", i18n.T("url ヘッダがリクエスト先と一致しない", "the url header does not match the request URL"))
 	}
 
 	req := &request{}
 	var key *jose.JSONWebKey
 	switch {
 	case h.JSONWebKey != nil && h.KeyID != "":
-		return nil, malformed("jwk と kid は同時に使えない")
+		return nil, malformed("%s", i18n.T("jwk と kid は同時に使えない", "jwk and kid cannot be used together"))
 	case wantJWK:
 		if h.JSONWebKey == nil {
-			return nil, malformed("このリクエストには jwk ヘッダが必要")
+			return nil, malformed("%s", i18n.T("このリクエストには jwk ヘッダが必要", "this request requires a jwk header"))
 		}
 		if err := checkAccountKey(h.JSONWebKey); err != nil {
 			return nil, newProblem(http.StatusBadRequest, "badPublicKey", "%v", err)
@@ -83,32 +84,32 @@ func (s *Server) verify(r *http.Request, wantJWK bool) (*request, *problem) {
 		key, req.jwk = h.JSONWebKey, h.JSONWebKey
 	default:
 		if h.KeyID == "" {
-			return nil, malformed("このリクエストには kid ヘッダが必要")
+			return nil, malformed("%s", i18n.T("このリクエストには kid ヘッダが必要", "this request requires a kid header"))
 		}
 		id, ok := strings.CutPrefix(h.KeyID, s.url(pathAccount))
 		if !ok || id == "" || strings.Contains(id, "/") {
-			return nil, newProblem(http.StatusBadRequest, "accountDoesNotExist", "kid が不正")
+			return nil, newProblem(http.StatusBadRequest, "accountDoesNotExist", "%s", i18n.T("kid が不正", "invalid kid"))
 		}
 		acct, err := s.db.Account(id)
 		if errors.Is(err, store.ErrNotFound) {
-			return nil, newProblem(http.StatusBadRequest, "accountDoesNotExist", "アカウントが存在しない")
+			return nil, newProblem(http.StatusBadRequest, "accountDoesNotExist", "%s", i18n.T("アカウントが存在しない", "account does not exist"))
 		}
 		if err != nil {
-			return nil, serverInternal("アカウントを読めない")
+			return nil, serverInternal("%s", i18n.T("アカウントを読めない", "cannot read the account"))
 		}
 		if acct.Status != store.StatusValid {
-			return nil, unauthorized("アカウントが無効")
+			return nil, unauthorized("%s", i18n.T("アカウントが無効", "the account is not valid"))
 		}
 		key = &jose.JSONWebKey{}
 		if err := key.UnmarshalJSON(acct.JWK); err != nil {
-			return nil, serverInternal("アカウント鍵を読めない")
+			return nil, serverInternal("%s", i18n.T("アカウント鍵を読めない", "cannot read the account key"))
 		}
 		req.account = acct
 	}
 
 	payload, err := obj.Verify(key)
 	if err != nil {
-		return nil, malformed("署名の検証に失敗した")
+		return nil, malformed("%s", i18n.T("署名の検証に失敗した", "signature verification failed"))
 	}
 	req.payload = payload
 	req.postAsGet = len(payload) == 0
@@ -121,10 +122,10 @@ func emptyHeader(h jose.Header) bool {
 
 func checkAccountKey(k *jose.JSONWebKey) error {
 	if !k.Valid() || !k.IsPublic() {
-		return errors.New("jwk は有効な公開鍵にする")
+		return errors.New(i18n.T("jwk は有効な公開鍵にする", "jwk must be a valid public key"))
 	}
 	if rk, ok := k.Key.(*rsa.PublicKey); ok && rk.N.BitLen() < 2048 {
-		return errors.New("RSA のアカウント鍵は 2048 bit 以上")
+		return errors.New(i18n.T("RSA のアカウント鍵は 2048 bit 以上", "RSA account keys must be at least 2048 bits"))
 	}
 	return nil
 }
@@ -140,46 +141,46 @@ func thumbprint(k *jose.JSONWebKey) (string, error) {
 // verifyEAB は newAccount の externalAccountBinding（RFC 8555 §7.3.4）を検証し、使われた EAB 鍵を返す。
 func (s *Server) verifyEAB(raw json.RawMessage, accountKey *jose.JSONWebKey) (eab.Key, *problem) {
 	if len(raw) == 0 || string(raw) == "null" {
-		return eab.Key{}, newProblem(http.StatusUnauthorized, "externalAccountRequired", "この CA は External Account Binding が必須")
+		return eab.Key{}, newProblem(http.StatusUnauthorized, "externalAccountRequired", "%s", i18n.T("この CA は External Account Binding が必須", "this CA requires External Account Binding"))
 	}
 	obj, err := jose.ParseSigned(string(raw), eabAlgs)
 	if err != nil {
-		return eab.Key{}, malformed("externalAccountBinding を解釈できない: %v", err)
+		return eab.Key{}, malformed(i18n.T("externalAccountBinding を解釈できない: %v", "cannot parse externalAccountBinding: %v"), err)
 	}
 	if len(obj.Signatures) != 1 || !emptyHeader(obj.Signatures[0].Unprotected) {
-		return eab.Key{}, malformed("externalAccountBinding の形式が不正")
+		return eab.Key{}, malformed("%s", i18n.T("externalAccountBinding の形式が不正", "malformed externalAccountBinding"))
 	}
 	h := obj.Signatures[0].Protected
 	if h.Nonce != "" {
-		return eab.Key{}, malformed("externalAccountBinding に nonce は含めない")
+		return eab.Key{}, malformed("%s", i18n.T("externalAccountBinding に nonce は含めない", "externalAccountBinding must not contain a nonce"))
 	}
 	if u, _ := h.ExtraHeaders["url"].(string); u != s.url(pathNewAccount) {
-		return eab.Key{}, unauthorized("externalAccountBinding の url が不正")
+		return eab.Key{}, unauthorized("%s", i18n.T("externalAccountBinding の url が不正", "invalid url in externalAccountBinding"))
 	}
 	k, ok, err := s.eab.Lookup(h.KeyID)
 	if err != nil {
-		s.log.Error("EAB 鍵ファイルを読めない", "err", err)
-		return eab.Key{}, serverInternal("EAB 鍵を確認できない")
+		s.log.Error(i18n.T("EAB 鍵ファイルを読めない", "cannot read the EAB key file"), "err", err)
+		return eab.Key{}, serverInternal("%s", i18n.T("EAB 鍵を確認できない", "cannot check the EAB key"))
 	}
 	if !ok {
-		return eab.Key{}, unauthorized("EAB 鍵が無効")
+		return eab.Key{}, unauthorized("%s", i18n.T("EAB 鍵が無効", "invalid EAB key"))
 	}
 	hmacKey, err := k.HMACKey()
 	if err != nil {
-		return eab.Key{}, serverInternal("EAB 鍵を確認できない")
+		return eab.Key{}, serverInternal("%s", i18n.T("EAB 鍵を確認できない", "cannot check the EAB key"))
 	}
 	payload, err := obj.Verify(hmacKey)
 	if err != nil {
-		return eab.Key{}, unauthorized("EAB の署名の検証に失敗した")
+		return eab.Key{}, unauthorized("%s", i18n.T("EAB の署名の検証に失敗した", "EAB signature verification failed"))
 	}
 	var bound jose.JSONWebKey
 	if err := bound.UnmarshalJSON(payload); err != nil {
-		return eab.Key{}, malformed("EAB の内容が JWK ではない")
+		return eab.Key{}, malformed("%s", i18n.T("EAB の内容が JWK ではない", "the EAB payload is not a JWK"))
 	}
 	got, err1 := thumbprint(&bound)
 	want, err2 := thumbprint(accountKey)
 	if err1 != nil || err2 != nil || subtle.ConstantTimeCompare([]byte(got), []byte(want)) != 1 {
-		return eab.Key{}, unauthorized("EAB がアカウント鍵と一致しない")
+		return eab.Key{}, unauthorized("%s", i18n.T("EAB がアカウント鍵と一致しない", "the EAB does not match the account key"))
 	}
 	return k, nil
 }

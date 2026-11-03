@@ -2,17 +2,17 @@
 {{range .Warnings}}<div class="alert">{{.}}</div>{{end}}
 
 <section class="cards">
-  <div class="card"><div class="num">{{.Valid}}</div><div class="label">有効な証明書</div></div>
-  <div class="card"><div class="num">{{.Revoked}}</div><div class="label">失効（期限内）</div></div>
-  <div class="card {{if .ExpiringSoon}}warn{{end}}"><div class="num">{{.ExpiringSoon}}</div><div class="label">更新が遅れている</div></div>
-  <div class="card {{if .Pending}}warn{{end}}"><div class="num">{{.Pending}}</div><div class="label">未完了</div></div>
-  <div class="card"><div class="num">{{.EABKeys}}</div><div class="label">EAB 鍵</div></div>
-  <div class="card"><div class="num">{{.Accounts}}</div><div class="label">アカウント</div></div>
+  <div class="card"><div class="num">{{.Valid}}</div><div class="label">{{t "有効な証明書" "Valid certificates"}}</div></div>
+  <div class="card"><div class="num">{{.Revoked}}</div><div class="label">{{t "失効（期限内）" "Revoked (unexpired)"}}</div></div>
+  <div class="card {{if .ExpiringSoon}}warn{{end}}"><div class="num">{{.ExpiringSoon}}</div><div class="label">{{t "更新が遅れている" "Overdue for renewal"}}</div></div>
+  <div class="card {{if .Pending}}warn{{end}}"><div class="num">{{.Pending}}</div><div class="label">{{t "未完了" "Incomplete"}}</div></div>
+  <div class="card"><div class="num">{{.EABKeys}}</div><div class="label">{{t "EAB 鍵" "EAB keys"}}</div></div>
+  <div class="card"><div class="num">{{.Accounts}}</div><div class="label">{{t "アカウント" "Accounts"}}</div></div>
 </section>
 
-<h2>CA の証明書</h2>
+<h2>{{t "CA の証明書" "CA certificates"}}</h2>
 <table>
-  <thead><tr><th>種類</th><th>名前</th><th>有効期限</th><th>残り</th><th>名前制約</th></tr></thead>
+  <thead><tr><th>{{t "種類" "Type"}}</th><th>{{t "名前" "Name"}}</th><th>{{t "有効期限" "Expires"}}</th><th>{{t "残り" "Remaining"}}</th><th>{{t "名前制約" "Name constraints"}}</th></tr></thead>
   <tbody>
   {{range .CA}}
     <tr class="{{if .Warn}}row-warn{{end}}"><td>{{.Label}}</td><td>{{.Subject}}</td><td>{{fmtTime .NotAfter}}</td><td>{{.Remaining}}</td><td>{{if .Permitted}}{{join .Permitted ", "}}{{else}}—{{end}}</td></tr>
@@ -20,12 +20,12 @@
   </tbody>
 </table>
 
-<h2>設定</h2>
+<h2>{{t "設定" "Settings"}}</h2>
 <table class="kv">
-  <tr><th>ACME の URL</th><td>{{.ExternalURL}}/acme/directory</td></tr>
-  <tr><th>発行してよいドメイン</th><td>{{join .AllowedDomains ", "}}</td></tr>
-  <tr><th>証明書の有効期間</th><td>{{.Validity}}</td></tr>
-  <tr><th>最後の発行</th><td>{{fmtTime .LastIssued}}</td></tr>
-  <tr><th>起動時刻</th><td>{{fmtTime .Started}}</td></tr>
+  <tr><th>{{t "ACME の URL" "ACME URL"}}</th><td>{{.ExternalURL}}/acme/directory</td></tr>
+  <tr><th>{{t "発行してよいドメイン" "Allowed domains"}}</th><td>{{join .AllowedDomains ", "}}</td></tr>
+  <tr><th>{{t "証明書の有効期間" "Certificate lifetime"}}</th><td>{{.Validity}}</td></tr>
+  <tr><th>{{t "最後の発行" "Last issuance"}}</th><td>{{fmtTime .LastIssued}}</td></tr>
+  <tr><th>{{t "起動時刻" "Started at"}}</th><td>{{fmtTime .Started}}</td></tr>
 </table>
 {{end}}{{end}}

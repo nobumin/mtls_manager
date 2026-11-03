@@ -1,32 +1,32 @@
 {{define "content"}}{{with .Data}}
 <form class="filter" method="get" action="/certs">
-  <input type="search" name="q" value="{{.Query}}" placeholder="名前・シリアル・EAB 鍵のメモで絞り込み">
-  <label><input type="checkbox" name="all" value="1" {{if .All}}checked{{end}}> 期限切れも表示</label>
-  <button type="submit">絞り込む</button>
+  <input type="search" name="q" value="{{.Query}}" placeholder="{{t "名前・シリアル・EAB 鍵のメモで絞り込み" "Filter by name, serial or EAB key note"}}">
+  <label><input type="checkbox" name="all" value="1" {{if .All}}checked{{end}}> {{t "期限切れも表示" "Show expired"}}</label>
+  <button type="submit">{{t "絞り込む" "Filter"}}</button>
 </form>
-<p class="muted">{{.Total}} 件{{if .Truncated}}（新しい順に 1000 件まで表示）{{end}}。期限切れから 7 日を過ぎた記録は自動で消える。{{if $.Operator}}失効は CRL に反映される（CRL を読むソフトにだけ効く）。{{end}}</p>
+<p class="muted">{{printf (t "%d 件" "%d certificate(s)") .Total}}{{if .Truncated}}{{t "（新しい順に 1000 件まで表示）" " (showing the newest 1000)"}}{{end}}{{t "。期限切れから 7 日を過ぎた記録は自動で消える。" ". Records are removed automatically 7 days after expiry."}}{{if $.Operator}}{{t "失効は CRL に反映される（CRL を読むソフトにだけ効く）。" " Revocations appear in the CRL (they only affect software that reads the CRL)."}}{{end}}</p>
 <table>
-  <thead><tr><th>名前</th><th>状態</th><th>発行</th><th>有効期限</th><th>EAB 鍵</th><th>シリアル</th>{{if $.Operator}}<th>失効</th>{{end}}</tr></thead>
+  <thead><tr><th>{{t "名前" "Names"}}</th><th>{{t "状態" "Status"}}</th><th>{{t "発行" "Issued"}}</th><th>{{t "有効期限" "Expires"}}</th><th>{{t "EAB 鍵" "EAB key"}}</th><th>{{t "シリアル" "Serial"}}</th>{{if $.Operator}}<th>{{t "失効" "Revoke"}}</th>{{end}}</tr></thead>
   <tbody>
   {{range .Rows}}
     <tr><td>{{join .Names ", "}}</td><td><span class="badge {{.StatusCSS}}">{{.Status}}</span></td><td>{{fmtTime .Issued}}</td><td>{{fmtTime .NotAfter}}</td><td>{{.EABNote}}</td><td class="mono">{{.Serial}}</td>
     {{if $.Operator}}<td>{{if or (eq .StatusCSS "ok") (eq .StatusCSS "warn")}}
-      <form class="inline" method="post" action="/certs/revoke" data-confirm="証明書 {{.Serial}}（{{join .Names ", "}}）を失効させる。元に戻せない。">
+      <form class="inline" method="post" action="/certs/revoke" data-confirm="{{printf (t "証明書 %s（%s）を失効させる。元に戻せない。" "Revoke certificate %s (%s)? This cannot be undone.") .Serial (join .Names ", ")}}">
         <input type="hidden" name="csrf" value="{{$.CSRF}}">
         <input type="hidden" name="serial" value="{{.Serial}}">
         <select name="reason">
-          <option value="0">指定なし</option>
-          <option value="1">鍵の漏えい</option>
-          <option value="3">所属の変更</option>
-          <option value="4">置き換え</option>
-          <option value="5">運用停止</option>
+          <option value="0">{{t "指定なし" "Unspecified"}}</option>
+          <option value="1">{{t "鍵の漏えい" "Key compromise"}}</option>
+          <option value="3">{{t "所属の変更" "Affiliation changed"}}</option>
+          <option value="4">{{t "置き換え" "Superseded"}}</option>
+          <option value="5">{{t "運用停止" "Cessation of operation"}}</option>
         </select>
-        <label><input type="checkbox" name="confirm" value="yes" required> 確認</label>
-        <button type="submit" class="danger">失効</button>
+        <label><input type="checkbox" name="confirm" value="yes" required> {{t "確認" "Confirm"}}</label>
+        <button type="submit" class="danger">{{t "失効" "Revoke"}}</button>
       </form>
     {{end}}</td>{{end}}</tr>
   {{else}}
-    <tr><td colspan="{{if $.Operator}}7{{else}}6{{end}}" class="muted">該当する証明書はない</td></tr>
+    <tr><td colspan="{{if $.Operator}}7{{else}}6{{end}}" class="muted">{{t "該当する証明書はない" "No matching certificates"}}</td></tr>
   {{end}}
   </tbody>
 </table>

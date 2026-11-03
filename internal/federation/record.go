@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nobumin/mtls_manager/internal/i18n"
 	"github.com/nobumin/mtls_manager/internal/names"
 	"github.com/nobumin/mtls_manager/internal/pki"
 )
@@ -57,17 +58,17 @@ func NewRecord(root *x509.Certificate, domains []string, organization string, co
 func ParseRecord(data []byte) (*Record, *x509.Certificate, error) {
 	var r Record
 	if err := json.Unmarshal(data, &r); err != nil {
-		return nil, nil, fmt.Errorf("連携情報を解釈できない: %w", err)
+		return nil, nil, fmt.Errorf(i18n.T("連携情報を解釈できない: %w", "cannot parse the federation record: %w"), err)
 	}
 	if r.Format != RecordFormat {
-		return nil, nil, fmt.Errorf("連携情報の形式 %q に対応していない（%s）", r.Format, RecordFormat)
+		return nil, nil, fmt.Errorf(i18n.T("連携情報の形式 %q に対応していない（%s）", "unsupported federation record format %q (%s)"), r.Format, RecordFormat)
 	}
 	root, err := parseRoot(r.RootCert)
 	if err != nil {
 		return nil, nil, err
 	}
 	if !FingerprintEqual(r.RootSHA256, Fingerprint(root)) {
-		return nil, nil, errors.New("root_sha256 がルート CA の証明書と一致しない")
+		return nil, nil, errors.New(i18n.T("root_sha256 がルート CA の証明書と一致しない", "root_sha256 does not match the root CA certificate"))
 	}
 	if r.Domains, err = NormalizeScope(r.Domains); err != nil {
 		return nil, nil, err
@@ -78,10 +79,10 @@ func ParseRecord(data []byte) (*Record, *x509.Certificate, error) {
 func parseRoot(pemText string) (*x509.Certificate, error) {
 	certs, err := pki.ParseCertsPEM([]byte(pemText))
 	if err != nil {
-		return nil, fmt.Errorf("ルート CA の証明書を解釈できない: %w", err)
+		return nil, fmt.Errorf(i18n.T("ルート CA の証明書を解釈できない: %w", "cannot parse the root CA certificate: %w"), err)
 	}
 	if len(certs) != 1 {
-		return nil, fmt.Errorf("ルート CA の証明書は 1 枚にする（%d 枚ある）", len(certs))
+		return nil, fmt.Errorf(i18n.T("ルート CA の証明書は 1 枚にする（%d 枚ある）", "exactly one root CA certificate is required (found %d)"), len(certs))
 	}
 	if err := CheckRoot(certs[0]); err != nil {
 		return nil, err
@@ -92,14 +93,14 @@ func parseRoot(pemText string) (*x509.Certificate, error) {
 // CheckRoot はルート CA として正しいか（自己署名・CA・期限内・鍵の種類と長さ）を確かめる。
 func CheckRoot(c *x509.Certificate) error {
 	if !c.IsCA || !c.BasicConstraintsValid {
-		return errors.New("ルート CA ではない（CA:TRUE でない）")
+		return errors.New(i18n.T("ルート CA ではない（CA:TRUE でない）", "not a root CA (not CA:TRUE)"))
 	}
 	if err := c.CheckSignatureFrom(c); err != nil {
-		return errors.New("ルート CA ではない（自己署名でない）")
+		return errors.New(i18n.T("ルート CA ではない（自己署名でない）", "not a root CA (not self-signed)"))
 	}
 	now := time.Now()
 	if now.Before(c.NotBefore) || now.After(c.NotAfter) {
-		return errors.New("ルート CA の証明書が有効期間の外")
+		return errors.New(i18n.T("ルート CA の証明書が有効期間の外", "the root CA certificate is outside its validity period"))
 	}
 	return pki.CheckPublicKey(c.PublicKey)
 }
@@ -144,7 +145,7 @@ var idRe = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$`)
 // ValidateID は連携先の識別子の書式（[a-z0-9-]{1,32}、先頭・末尾はハイフン不可）を確かめる。
 func ValidateID(id string) error {
 	if !idRe.MatchString(id) {
-		return fmt.Errorf("連携先の識別子 %q は英小文字・数字・ハイフンの 1〜32 文字にする（先頭・末尾はハイフン不可）", id)
+		return fmt.Errorf(i18n.T("連携先の識別子 %q は英小文字・数字・ハイフンの 1〜32 文字にする（先頭・末尾はハイフン不可）", "partner identifier %q must be 1 to 32 lowercase letters, digits or hyphens (not starting or ending with a hyphen)"), id)
 	}
 	return nil
 }
