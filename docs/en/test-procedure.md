@@ -17,7 +17,8 @@ from installation through testing. Each step lists its expected result; work fro
 > For convenience the test root CA key lives on the same machine. **In production the root CA key stays on an offline machine** ([getting started](getting-started.md)).
 > Do not use keys or certificates created here outside the test.
 >
-> mtls-ca and mtls-agent print messages in Japanese. The expected results quote them, with an English gloss in parentheses.
+> mtls-ca, mtls-agent and mtlsctl show messages in Japanese by default. This procedure switches them to English (1-4) and quotes the English messages.
+> To follow it in Japanese, use the [Japanese version](../ja/test-procedure.md).
 
 ## 0. Test environment
 
@@ -89,6 +90,16 @@ sudo useradd --system --home /var/lib/mtls-ca    --shell /usr/sbin/nologin mtls-
 sudo useradd --system --home /var/lib/mtls-agent --shell /usr/sbin/nologin mtls-agent
 ```
 
+Show messages in English: set `MTLS_LANG=en` in your shell and let sudo pass it through (sudo resets environment variables by default).
+The CA and mtls-agent services get it from their unit files (1-7, 1-8).
+
+```sh
+export MTLS_LANG=en      # set it again in every new shell
+echo 'Defaults env_keep += "MTLS_LANG"' | sudo tee /etc/sudoers.d/mtls-lang >/dev/null
+sudo chmod 0440 /etc/sudoers.d/mtls-lang
+sudo visudo -cf /etc/sudoers.d/mtls-lang   # must print "parsed OK"
+```
+
 ### 1-5. Root and intermediate CA
 
 ```sh
@@ -154,9 +165,10 @@ The `*.hmac` files are secrets (even in a test, keep them out of repositories).
 
 ```sh
 sudo install -m 0644 src/deploy/systemd/mtls-ca.service /etc/systemd/system/
+sudo sed -i 's/^# Environment=MTLS_LANG=en/Environment=MTLS_LANG=en/' /etc/systemd/system/mtls-ca.service   # English messages
 sudo systemctl daemon-reload
 sudo systemctl enable --now mtls-ca
-journalctl -u mtls-ca -n 5 --no-pager      # must show 「mtls-ca を起動した」 (mtls-ca started)
+journalctl -u mtls-ca -n 5 --no-pager      # must show `mtls-ca started`
 ```
 
 ### 1-8. mtls-agent (web1 / app1 / app2)
@@ -169,6 +181,7 @@ sed -e 's#/etc/mtls-agent/config.yaml#/etc/mtls-agent-%i/config.yaml#' \
     -e 's#^ReadWritePaths=/etc/mtls-agent/tls#ReadWritePaths=/etc/mtls-agent-%i/tls#' \
     -e 's#^StateDirectory=mtls-agent$#StateDirectory=mtls-agent-%i#' \
     -e 's#^Description=mtls-agent #Description=mtls-agent %i #' \
+    -e 's/^# Environment=MTLS_LANG=en/Environment=MTLS_LANG=en/' \
     src/deploy/systemd/mtls-agent.service | sudo tee /etc/systemd/system/mtls-agent@.service >/dev/null
 sudo systemctl daemon-reload
 ```
@@ -263,6 +276,7 @@ The tests use these variables (set them again in every new shell).
 
 ```sh
 cd ~/mtls-test
+export MTLS_LANG=en
 W=/etc/mtls-agent-web1/tls; A=/etc/mtls-agent-app1/tls; P=/etc/mtls-agent-app2/tls
 ```
 
@@ -270,7 +284,7 @@ W=/etc/mtls-agent-web1/tls; A=/etc/mtls-agent-app1/tls; P=/etc/mtls-agent-app2/t
 
 | ID | Steps | Expected result | Result |
 | --- | --- | --- | --- |
-| CA-01 | `systemctl status mtls-ca --no-pager` | `active (running)`. `journalctl -u mtls-ca` shows 「mtls-ca を起動した」 (started) with `listen=127.0.10.1:8443`, `allowed_domains=[internal.example.com]`, `cert_validity=15m0s` | |
+| CA-01 | `systemctl status mtls-ca --no-pager` | `active (running)`. `journalctl -u mtls-ca` shows `mtls-ca started` with `listen=127.0.10.1:8443`, `allowed_domains=[internal.example.com]`, `cert_validity=15m0s` | |
 | CA-02 | `curl --noproxy '*' -sS --cacert /etc/mtls-ca/root.crt https://ca.internal.example.com:8443/acme/directory` | JSON including `"externalAccountRequired":true` (registration needs an EAB key) | |
 | CA-03 | `curl --noproxy '*' -sS --cacert /etc/mtls-ca/root.crt -o /dev/null -w '%{http_code} %{content_type}\n' https://ca.internal.example.com:8443/crl` | `200 application/pkix-crl` | |
 | CA-04 | `sudo ls -l /etc/mtls-ca /var/lib/mtls-ca` | `intermediate.key` and `eab.json` are owned by `mtls-ca` with `-rw-------` (0600). `/var/lib/mtls-ca` is owned by `mtls-ca` | |
@@ -278,7 +292,7 @@ W=/etc/mtls-agent-web1/tls; A=/etc/mtls-agent-app1/tls; P=/etc/mtls-agent-app2/t
 ### Settings that prevent startup (CA-05 to CA-10)
 
 Stop the CA, then start it in the foreground with a broken setting and confirm that **it refuses to start**. Always restore and restart afterwards.
-(Stop the service first: otherwise the foreground process fails after a few seconds with 「データベースを開けない（別の mtls-ca が動いていないか確認する）」 (cannot open the database; check that no other mtls-ca is running) before reaching the error being tested.)
+(Stop the service first: otherwise the foreground process fails after a few seconds with `cannot open the database (check that no other mtls-ca is running)` before reaching the error being tested.)
 
 ```sh
 sudo systemctl stop mtls-ca
@@ -293,18 +307,18 @@ mk cidr 's#^allowed_client_cidrs: .*#allowed_client_cidrs: ["10.0.0.0/8"]#'
 
 | ID | Steps | Expected result | Result |
 | --- | --- | --- | --- |
-| CA-05 | `sudo chmod 0640 /etc/mtls-ca/intermediate.key; sudo -u mtls-ca mtls-ca -config /etc/mtls-ca/config.yaml; echo $?; sudo chmod 0600 /etc/mtls-ca/intermediate.key` | `/etc/mtls-ca/intermediate.key: 権限が緩すぎる（0640）…` (permissions too loose) and exit code 1 | |
-| CA-06 | `sudo chmod 0644 /etc/mtls-ca/eab.json; sudo -u mtls-ca mtls-ca -config /etc/mtls-ca/config.yaml; echo $?; sudo chmod 0600 /etc/mtls-ca/eab.json` | `eab_file: /etc/mtls-ca/eab.json: 権限が緩すぎる（0644）…` (permissions too loose) and exit code 1 | |
+| CA-05 | `sudo chmod 0640 /etc/mtls-ca/intermediate.key; sudo -u mtls-ca mtls-ca -config /etc/mtls-ca/config.yaml; echo $?; sudo chmod 0600 /etc/mtls-ca/intermediate.key` | `/etc/mtls-ca/intermediate.key: permissions too loose (0640); run chmod 600 ...` and exit code 1 | |
+| CA-06 | `sudo chmod 0644 /etc/mtls-ca/eab.json; sudo -u mtls-ca mtls-ca -config /etc/mtls-ca/config.yaml; echo $?; sudo chmod 0600 /etc/mtls-ca/eab.json` | `eab_file: /etc/mtls-ca/eab.json: permissions too loose (0644); run chmod 600 ...` and exit code 1 | |
 | CA-07 | `sudo mv /etc/mtls-ca/eab.json /etc/mtls-ca/eab.json.bak; sudo -u mtls-ca mtls-ca -config /etc/mtls-ca/config.yaml; echo $?; sudo mv /etc/mtls-ca/eab.json.bak /etc/mtls-ca/eab.json` | `eab_file: stat /etc/mtls-ca/eab.json: no such file or directory…` and exit code 1 | |
-| CA-08 | `sudo -u mtls-ca mtls-ca -config /etc/mtls-ca/test/domain.yaml; echo $?` | `policy.allowed_domains の "example.org" が中間 CA の名前制約 [internal.example.com] の範囲外` (outside the intermediate's name constraints) and exit code 1 | |
-| CA-09 | `sudo -u mtls-ca mtls-ca -config /etc/mtls-ca/test/validity.yaml; echo $?` | `cert.validity は 10m〜90d` (must be 10m to 90d) and exit code 1 | |
-| CA-10 | `sudo -u mtls-ca mtls-ca -config /etc/mtls-ca/test/url.yaml; echo $?` | `external_url "http://..." は https://ホスト[:ポート] の形にする` (must be https://host[:port]) and exit code 1 | |
+| CA-08 | `sudo -u mtls-ca mtls-ca -config /etc/mtls-ca/test/domain.yaml; echo $?` | `"example.org" in policy.allowed_domains is outside the intermediate CA's name constraints [internal.example.com]` and exit code 1 | |
+| CA-09 | `sudo -u mtls-ca mtls-ca -config /etc/mtls-ca/test/validity.yaml; echo $?` | `cert.validity must be 10m to 90d` and exit code 1 | |
+| CA-10 | `sudo -u mtls-ca mtls-ca -config /etc/mtls-ca/test/url.yaml; echo $?` | `external_url "http://..." must be of the form https://host[:port]` and exit code 1 | |
 
 ### Source address restriction (CA-11)
 
 | ID | Steps | Expected result | Result |
 | --- | --- | --- | --- |
-| CA-11 | In one terminal run `sudo -u mtls-ca mtls-ca -config /etc/mtls-ca/test/cidr.yaml`; in a second terminal run `curl --noproxy '*' -sS -o /dev/null -w '%{http_code}\n' --cacert /etc/mtls-ca/root.crt https://ca.internal.example.com:8443/acme/directory`. Then press Ctrl+C in the first terminal | `403`. The CA log shows 「許可されていない送信元からの接続を拒否」 (connection from a disallowed source refused; the source `127.0.0.1` is not in `10.0.0.0/8`) | |
+| CA-11 | In one terminal run `sudo -u mtls-ca mtls-ca -config /etc/mtls-ca/test/cidr.yaml`; in a second terminal run `curl --noproxy '*' -sS -o /dev/null -w '%{http_code}\n' --cacert /etc/mtls-ca/root.crt https://ca.internal.example.com:8443/acme/directory`. Then press Ctrl+C in the first terminal | `403`. The CA log shows `refused a connection from a disallowed source` (the source `127.0.0.1` is not in `10.0.0.0/8`) | |
 
 Then restart with the original configuration.
 
@@ -315,19 +329,19 @@ sudo systemctl start mtls-ca && systemctl is-active mtls-ca     # active
 
 | ID | Steps | Expected result | Result |
 | --- | --- | --- | --- |
-| CA-12 | Start a second instance while the CA is running: `sudo -u mtls-ca mtls-ca -config /etc/mtls-ca/config.yaml; echo $?` | After a few seconds, `データベースを開けない（別の mtls-ca が動いていないか確認する）: timeout` (cannot open the database; check that no other mtls-ca is running), exit code 1 (no double start). The running CA is unaffected (`systemctl is-active mtls-ca` shows `active`) | |
+| CA-12 | Start a second instance while the CA is running: `sudo -u mtls-ca mtls-ca -config /etc/mtls-ca/config.yaml; echo $?` | After a few seconds, `cannot open the database (check that no other mtls-ca is running): timeout`, exit code 1 (no double start). The running CA is unaffected (`systemctl is-active mtls-ca` shows `active`) | |
 
 ## 3. mtls-agent
 
 | ID | Steps | Expected result | Result |
 | --- | --- | --- | --- |
-| AG-01 | `sudo systemctl enable --now mtls-agent@web1 mtls-agent@app1`, then after a few seconds `journalctl -u mtls-agent@web1 -n 10 --no-pager` (same for app1) | In order: 「アカウント鍵を作成した」 (account key created) → 「CA にアカウントを登録した」 (registered with the CA) → 「証明書を更新した」 (certificate renewed) → 「更新後のコマンドを実行した」 (post-renewal command ran) | |
+| AG-01 | `sudo systemctl enable --now mtls-agent@web1 mtls-agent@app1`, then after a few seconds `journalctl -u mtls-agent@web1 -n 10 --no-pager` (same for app1) | In order: `created the account key` → `registered an account with the CA` → `renewed the certificate` → `ran the post-renewal command` | |
 | AG-02 | `sudo ls -l $W` | `ca.pem`, `cert.pem`, `chain.pem`, `fullchain.pem`, `key.pem` and `renewed` exist. Only `key.pem` is `-rw-------` (0600); the owner is `mtls-agent` | |
 | AG-03 | `mtlsctl inspect $W/cert.pem` | `Subject: CN=web1.internal.example.com`, `Issuer: CN=Test mTLS CA`, DNS names `[web1.internal.example.com]`, usage `serverAuth, clientAuth`, a lifetime of about 15 minutes | |
-| AG-04 | `sudo mtls-agent check -config /etc/mtls-agent-web1/config.yaml; echo $?` | Status `正常` (OK), the planned renewal (`更新予定`) about 10 minutes after issuance, exit code 0 | |
-| AG-05 | `sudo systemctl restart mtls-agent@web1`, then `journalctl -u mtls-agent@web1 -n 3 --no-pager` | Only 「mtls-agent を起動した」 (started); no new certificate is fetched (the current one is valid) | |
-| AG-06 | `sudo systemctl reload mtls-agent@web1` (renew now), then `journalctl -u mtls-agent@web1 -n 3 --no-pager` and `sudo mtls-agent check -config /etc/mtls-agent-web1/config.yaml` | 「証明書を取得する reason=手動での更新要求」 (fetching; manual request) → 「証明書を更新した」. The serial in `check` differs from AG-04 | |
-| AG-07 | Wait 10 minutes after AG-06 (the `更新予定` time in `check`), then `journalctl -u mtls-agent@web1 -n 3 --no-pager` | 「証明書を取得する reason=更新時期を過ぎた」 (renewal time passed) → 「証明書を更新した」 → 「更新後のコマンドを実行した」, without any action | |
+| AG-04 | `sudo mtls-agent check -config /etc/mtls-agent-web1/config.yaml; echo $?` | `Status:      OK`, `Renewal at:` about 10 minutes after issuance, exit code 0 | |
+| AG-05 | `sudo systemctl restart mtls-agent@web1`, then `journalctl -u mtls-agent@web1 -n 3 --no-pager` | Only `mtls-agent started`; no new certificate is fetched (the current one is valid) | |
+| AG-06 | `sudo systemctl reload mtls-agent@web1` (renew now), then `journalctl -u mtls-agent@web1 -n 3 --no-pager` and `sudo mtls-agent check -config /etc/mtls-agent-web1/config.yaml` | `msg="obtaining a certificate" reason="manual renewal request"` → `renewed the certificate`. The serial in `check` differs from AG-04 | |
+| AG-07 | Wait 10 minutes after AG-06 (the `Renewal at:` time in `check`), then `journalctl -u mtls-agent@web1 -n 3 --no-pager` | `msg="obtaining a certificate" reason="renewal time passed"` → `renewed the certificate` → `ran the post-renewal command`, without any action | |
 
 While waiting for AG-07 you can go ahead with AP-01 to AP-08 in 4.
 
@@ -342,10 +356,10 @@ sudo mtls-agent renew -config /etc/mtls-agent-app2/config.yaml; echo $?
 
 | ID | Steps | Expected result | Result |
 | --- | --- | --- | --- |
-| AG-08 | The `renew` above | 「CA にアカウントを登録した」 → 「証明書を更新した」, exit code 0. `sudo ls $P` shows the certificate | |
-| AG-09 | Request web1's name with app2's EAB key: `sudo sed 's/names: .*/names: ["web1.internal.example.com"]/' /etc/mtls-agent-app2/config.yaml \| sudo tee /etc/mtls-agent-app2/bad-name.yaml >/dev/null; sudo mtls-agent renew -config /etc/mtls-agent-app2/bad-name.yaml; echo $?` | `rejectedIdentifier: "web1.internal.example.com" はこのアカウント（EAB 鍵）には許可されていない` (not allowed for this account's EAB key), exit code 1 | |
-| AG-10 | Likewise with `names: ["app2.example.org"]` (`bad-domain.yaml`) and `renew` | `rejectedIdentifier: "app2.example.org" はこの CA で発行できるドメインの範囲外` (outside the domains this CA issues), exit code 1 | |
-| AG-11 | `sudo mv $P/cert.pem $P/cert.pem.bak; sudo mtls-agent check -config /etc/mtls-agent-app2/config.yaml; echo $?; sudo mv $P/cert.pem.bak $P/cert.pem` | Status `更新が必要 – 証明書が無い、または読めない` (renewal needed; certificate missing or unreadable), exit code 1 (usable for monitoring) | |
+| AG-08 | The `renew` above | `registered an account with the CA` → `renewed the certificate`, exit code 0. `sudo ls $P` shows the certificate | |
+| AG-09 | Request web1's name with app2's EAB key: `sudo sed 's/names: .*/names: ["web1.internal.example.com"]/' /etc/mtls-agent-app2/config.yaml \| sudo tee /etc/mtls-agent-app2/bad-name.yaml >/dev/null; sudo mtls-agent renew -config /etc/mtls-agent-app2/bad-name.yaml; echo $?` | `rejectedIdentifier: "web1.internal.example.com" is not allowed for this account (EAB key)`, exit code 1 | |
+| AG-10 | Likewise with `names: ["app2.example.org"]` (`bad-domain.yaml`) and `renew` | `rejectedIdentifier: "app2.example.org" is outside the domains this CA issues`, exit code 1 | |
+| AG-11 | `sudo mv $P/cert.pem $P/cert.pem.bak; sudo mtls-agent check -config /etc/mtls-agent-app2/config.yaml; echo $?; sudo mv $P/cert.pem.bak $P/cert.pem` | `Status:      renewal needed – certificate missing or unreadable`, exit code 1 (usable for monitoring) | |
 
 After AG-09 and AG-10, remove the broken configurations: `sudo rm /etc/mtls-agent-app2/bad-*.yaml`
 
@@ -353,7 +367,7 @@ After AG-09 and AG-10, remove the broken configurations: `sudo rm /etc/mtls-agen
 
 | ID | Steps | Expected result | Result |
 | --- | --- | --- | --- |
-| AG-12 | `sudo systemctl stop mtls-ca` → `sudo systemctl reload mtls-agent@app1` → `journalctl -u mtls-agent@app1 -n 2 --no-pager` → `sudo systemctl start mtls-ca` → wait about a minute → `journalctl -u mtls-agent@app1 -n 3 --no-pager` | While stopped: 「証明書を取得できない（再試行する）」 (cannot fetch; will retry) `… connection refused … retry_in=…`. After the CA starts, the retry logs 「証明書を更新した」. The existing certificate keeps working meanwhile | |
+| AG-12 | `sudo systemctl stop mtls-ca` → `sudo systemctl reload mtls-agent@app1` → `journalctl -u mtls-agent@app1 -n 2 --no-pager` → `sudo systemctl start mtls-ca` → wait about a minute → `journalctl -u mtls-agent@app1 -n 3 --no-pager` | While stopped: `cannot obtain a certificate (will retry)` `… connection refused … retry_in=…`. After the CA starts, the retry logs `renewed the certificate`. The existing certificate keeps working meanwhile | |
 
 ## 4. Application integration
 
@@ -372,7 +386,7 @@ sudo ./bin/server -addr 127.0.10.2:8443 -cert /etc/mtls-agent-web1/tls/fullchain
 | AP-01 | `sudo ./bin/client -cert $A/fullchain.pem -key $A/key.pem -ca $A/ca.pem https://web1.internal.example.com:8443/` | `hello, [app1.internal.example.com]` (the server returns the verified peer name) | |
 | AP-02 | `sudo curl --noproxy '*' -sS --cacert $A/ca.pem --cert $A/fullchain.pem --key $A/key.pem https://web1.internal.example.com:8443/` | `hello, [app1.internal.example.com]` | |
 | AP-03 | `curl --noproxy '*' -sS --cacert $A/ca.pem https://web1.internal.example.com:8443/` (no client certificate) | Fails with `alert certificate required`. The server log shows `client didn't provide a certificate` | |
-| AP-04 | `sudo curl --noproxy '*' -sS --cacert $P/ca.pem --cert $P/fullchain.pem --key $P/key.pem https://web1.internal.example.com:8443/` (app2) | Fails with `alert bad certificate`. The server log shows `mtls: 相手 [app2.internal.example.com] は許可されていない` (peer not allowed): a valid certificate from the same CA is still refused unless the peer is allowed | |
+| AP-04 | `sudo curl --noproxy '*' -sS --cacert $P/ca.pem --cert $P/fullchain.pem --key $P/key.pem https://web1.internal.example.com:8443/` (app2) | Fails with `alert bad certificate`. The server log shows `mtls: peer [app2.internal.example.com] is not allowed`: a valid certificate from the same CA is still refused unless the peer is allowed | |
 | AP-05 | `curl --noproxy '*' -sS --cacert $A/ca.pem --cert fake/app1.crt --key fake/app1.key https://web1.internal.example.com:8443/` ("app1" from another root CA) | Fails with `alert unknown ca`. The server log shows `certificate signed by unknown authority` | |
 | AP-06 | `sudo ./bin/client -cert $A/fullchain.pem -key $A/key.pem -ca fake/fake-root.crt https://web1.internal.example.com:8443/` (the client trusts only the other root) | Fails with `x509: certificate signed by unknown authority` (the client verifies the server too) | |
 | AP-07 | `sudo ./bin/client -cert $A/fullchain.pem -key $A/key.pem -ca $A/ca.pem https://127.0.10.2:8443/` (connect by address) | Fails with `cannot validate certificate for 127.0.10.2 because it doesn't contain any IP SANs` (connect by name) | |
@@ -401,13 +415,13 @@ Treat app2 as a decommissioned server: revoke its EAB key and revoke its certifi
 
 | ID | Steps | Expected result | Result |
 | --- | --- | --- | --- |
-| RV-01 | Find app2's kid with `sudo mtlsctl eab list -file /etc/mtls-ca/eab.json`, then `sudo mtlsctl eab revoke -file /etc/mtls-ca/eab.json -kid <app2's kid>` | 「EAB 鍵 … を取り消した。この鍵で登録したサーバは、以後新しい証明書を取得できない」 (revoked; servers registered with it can no longer get certificates). app2 disappears from `eab list` | |
-| RV-02 | `sudo mtls-agent renew -config /etc/mtls-agent-app2/config.yaml -force; echo $?` | `403 urn:ietf:params:acme:error:unauthorized: このアカウントの EAB 鍵は取り消されている` (this account's EAB key has been revoked), exit code 1 (applied without restarting the CA) | |
+| RV-01 | Find app2's kid with `sudo mtlsctl eab list -file /etc/mtls-ca/eab.json`, then `sudo mtlsctl eab revoke -file /etc/mtls-ca/eab.json -kid <app2's kid>` | `revoked EAB key …. Servers registered with this key can no longer obtain new certificates`. app2 disappears from `eab list` | |
+| RV-02 | `sudo mtls-agent renew -config /etc/mtls-agent-app2/config.yaml -force; echo $?` | `403 urn:ietf:params:acme:error:unauthorized: this account's EAB key has been revoked`, exit code 1 (applied without restarting the CA) | |
 | RV-03 | After `sudo systemctl reload nginx`, run AP-10 again | Still `403` (TLS verification passes): certificates already issued remain usable until they expire | |
-| RV-04 | Stop the CA and revoke app2's certificate:<br>`sudo systemctl stop mtls-ca`<br>`sudo -u mtls-ca mtls-ca certs -config /etc/mtls-ca/config.yaml`<br>`sudo -u mtls-ca mtls-ca revoke -config /etc/mtls-ca/config.yaml -serial <app2's serial> -reason 1`<br>`sudo systemctl start mtls-ca` | `certs` lists the issued certificates (use the SERIAL of app2's row). 「証明書 … を失効させた。mtls-ca を起動すると CRL に反映される」 (revoked; reflected in the CRL when mtls-ca starts) | |
+| RV-04 | Stop the CA and revoke app2's certificate:<br>`sudo systemctl stop mtls-ca`<br>`sudo -u mtls-ca mtls-ca certs -config /etc/mtls-ca/config.yaml`<br>`sudo -u mtls-ca mtls-ca revoke -config /etc/mtls-ca/config.yaml -serial <app2's serial> -reason 1`<br>`sudo systemctl start mtls-ca` | `certs` lists the issued certificates (use the SERIAL of app2's row). `revoked certificate …; it appears in the CRL when mtls-ca starts` | |
 | RV-05 | `curl --noproxy '*' -sS --cacert /etc/mtls-ca/root.crt https://ca.internal.example.com:8443/crl -o crl.der && openssl crl -inform DER -in crl.der -out crl.pem && openssl crl -in crl.pem -noout -text` | `Revoked Certificates:` lists app2's serial with `CRL Reason Code: Key Compromise` | |
 | RV-06 | `for c in $A $P; do sudo openssl verify -crl_check -CAfile $c/ca.pem -untrusted $c/chain.pem -CRLfile crl.pem $c/cert.pem; done` | app1 is `OK`; app2 is `certificate revoked` | |
-| RV-07 | After app2's certificate expires (the `有効期限` (expiry) in `sudo mtls-agent check -config /etc/mtls-agent-app2/config.yaml`), run `sudo systemctl reload nginx` and AP-10 again, then `sudo mtls-agent check -config /etc/mtls-agent-app2/config.yaml; echo $?` | AP-10 returns `400` (expired certificates fail TLS verification). `check` shows `更新が必要 – 有効期限が切れている` (renewal needed; expired), exit code 1 | |
+| RV-07 | After app2's certificate expires (the `Expires:` in `sudo mtls-agent check -config /etc/mtls-agent-app2/config.yaml`), run `sudo systemctl reload nginx` and AP-10 again, then `sudo mtls-agent check -config /etc/mtls-agent-app2/config.yaml; echo $?` | AP-10 returns `400` (expired certificates fail TLS verification). `check` shows `Status:      renewal needed – expired`, exit code 1 | |
 
 > **Note**: the `mtls` library and mtls-agent do not check the CRL ([operations guide](operations.md#revoking-a-certificate)).
 > After revocation, Go applications (as in AP-01) keep accepting the certificate until it expires. In urgent cases, remove the peer from the allow list (`AllowedPeers`).
@@ -424,6 +438,7 @@ sudo rm -rf /etc/mtls-ca /var/lib/mtls-ca /etc/mtls-agent-web1 /etc/mtls-agent-a
             /var/lib/mtls-agent-web1 /var/lib/mtls-agent-app1 /var/lib/mtls-agent-app2
 sudo rm -f /usr/local/bin/mtlsctl /usr/local/bin/mtls-ca /usr/local/bin/mtls-agent
 sudo userdel mtls-ca; sudo userdel mtls-agent
+sudo rm -f /etc/sudoers.d/mtls-lang
 sudo sed -i '/# mtls_manager test environment/,/app2.internal.example.com/d' /etc/hosts
 rm -rf ~/mtls-test        # this also deletes the test root CA key (offline/root.key)
 ```

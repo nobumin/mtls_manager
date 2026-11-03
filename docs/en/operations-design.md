@@ -244,11 +244,11 @@ Adjust the location in your backups ([14.](#14-backup-and-restore)) accordingly.
 | What | How | Healthy when |
 | --- | --- | --- |
 | CA liveness | `https://ca.internal.example.com:8443/healthz` (or whether the admin UI opens) | Returns `ok` |
-| CA certificate expiry | The admin UI overview; log message `中間 CA の有効期限が近い` | Rotate the intermediate when fewer than 30 days remain |
-| Late renewals | The "更新が遅れている" (late renewals) count in the admin UI | 0. Otherwise check mtls-agent on the affected server |
+| CA certificate expiry | The admin UI overview; log message `the intermediate CA expires soon` | Rotate the intermediate when fewer than 30 days remain |
+| Late renewals | The "Overdue for renewal" count in the admin UI | 0. Otherwise check mtls-agent on the affected server |
 | Each server | `mtls-agent check` on each server (exit code 1 if renewal is needed) | Run periodically from your monitoring system |
-| Validation failures | Log message `所有確認に失敗` | Check firewalls, name resolution, port conflicts |
-| Suspicious connections | Logs with `category=audit`, `許可されていない送信元からの接続を拒否` | No unexpected sources or names |
+| Validation failures | Log message `ownership validation failed` | Check firewalls, name resolution, port conflicts |
+| Suspicious connections | Logs with `category=audit`, `refused a connection from a disallowed source` | No unexpected sources or names |
 
 ## 11. Periodic tasks
 
@@ -278,7 +278,7 @@ Adjust the location in your backups ([14.](#14-backup-and-restore)) accordingly.
 | An EAB key (HMAC) leaked | Revoke that EAB key and deliver a new one. Check the account count of the key on the admin UI's EAB page for unexpected registrations |
 | Intermediate key leaked | ① Stop the CA ② Create a new intermediate and switch the CA ③ Certificates from the old intermediate expire within 24 hours ④ Assuming no certificates outside the name constraints can exist, investigate impersonation within them |
 | Root key leaked | Rebuild everything. Create a new root and intermediate, and set every server's `ca_root` to the new root only (remove the old root from trust) |
-| An admin certificate leaked | Revoke that admin's certificate and EAB key (**either one locks them out immediately**). If names are listed individually, also remove it from `admin.allowed_clients`. If the admin was read-only, nothing could be changed (and no secrets are displayed). If the admin is in `admin.operators`, check the audit log (`category=audit`: `EAB 鍵を発行` (EAB key issued) / `EAB 鍵を取り消し` (EAB key revoked) / `証明書を失効` (certificate revoked)), revoke any EAB keys issued without authorization, and have servers whose certificates were revoked obtain new ones (`systemctl reload mtls-agent`) |
+| An admin certificate leaked | Revoke that admin's certificate and EAB key (**either one locks them out immediately**). If names are listed individually, also remove it from `admin.allowed_clients`. If the admin was read-only, nothing could be changed (and no secrets are displayed). If the admin is in `admin.operators`, check the audit log (`category=audit`: `admin UI: issued an EAB key` / `admin UI: revoked an EAB key` / `admin UI: revoked a certificate`), revoke any EAB keys issued without authorization, and have servers whose certificates were revoked obtain new ones (`systemctl reload mtls-agent`) |
 
 ## 14. Backup and restore
 

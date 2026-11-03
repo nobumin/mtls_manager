@@ -40,7 +40,7 @@ Revocations are published in the CRL (`https://ca.internal.example.com:8443/crl`
 
 From the "Issued certificates" page of the admin UI (`admin.operators`), you can revoke **without stopping the CA**.
 
-Entries that `certs` shows as `未完了` (incomplete) are serials recorded before signing whose issuance did not complete
+Entries that `certs` shows as `incomplete` are serials recorded before signing whose issuance did not complete
 (e.g. the CA stopped or the disk failed). They were never returned to a client, so exposure is unlikely, but you can revoke them to be safe.
 
 > **Note**: in v0.x neither the `mtls` library nor `mtls-agent` checks the CRL. Revocation only affects software configured to read the CRL.
@@ -257,27 +257,27 @@ Backups contain private keys. Encrypt them and restrict access.
 - `mtls-agent check -config ...` returns **exit code 1** when renewal is needed (expired, overdue, name mismatch, etc.).
   Run it periodically from your monitoring system.
 - `https://ca.internal.example.com:8443/healthz` reports CA liveness.
-- Main log messages (currently in Japanese):
+- Main log messages (with `MTLS_LANG=en`; the Japanese messages are in the [Japanese guide](../ja/operations.md)):
 
   | Message | Meaning |
   | --- | --- |
-  | `証明書を発行` (mtls-ca) | Certificate issued (serial, names, EAB key) |
-  | `所有確認に失敗` (mtls-ca) | Validation failed (check ports, name resolution, firewall) |
-  | `許可されていない送信元からの接続を拒否` (mtls-ca) | Connection from outside `allowed_client_cidrs` |
-  | `証明書を取得できない（再試行する）` (mtls-agent) | Issuance failed; the reason follows |
-  | `更新後のコマンドが失敗した` (mtls-agent) | Certificate renewed, but `hooks.post_renew` failed |
-  | `取得した直後なのに更新が必要と判断された` (mtls-agent) | Something is wrong with the configuration or the CA; the agent waits instead of re-issuing in a loop. The reason follows |
-  | `中間 CA の有効期限が近い` (mtls-ca) | Rotate the intermediate ([procedure](#rotating-the-intermediate-ca-before-it-expires)) |
+  | `certificate issued` (mtls-ca) | Certificate issued (serial, names, EAB key) |
+  | `ownership validation failed` (mtls-ca) | Validation failed (check ports, name resolution, firewall) |
+  | `refused a connection from a disallowed source` (mtls-ca) | Connection from outside `allowed_client_cidrs` |
+  | `cannot obtain a certificate (will retry)` (mtls-agent) | Issuance failed; the reason follows |
+  | `the post-renewal command failed` (mtls-agent) | Certificate renewed, but `hooks.post_renew` failed |
+  | `renewal is judged necessary right after obtaining a certificate` (mtls-agent) | Something is wrong with the configuration or the CA; the agent waits instead of re-issuing in a loop. The reason follows |
+  | `the intermediate CA expires soon` (mtls-ca) | Rotate the intermediate ([procedure](#rotating-the-intermediate-ca-before-it-expires)) |
 
 ## Troubleshooting
 
 | Symptom | What to check |
 | --- | --- |
-| mtls-ca refuses to start: permissions too open (`権限が緩すぎる`) | `chmod 600` `intermediate.key` / `eab.json` and make mtls-ca the owner |
-| mtls-ca cannot open the database (`データベースを開けない`) | Another mtls-ca is running (`certs` / `revoke` require the CA to be stopped) |
-| mtls-agent: EAB key invalid (`EAB 鍵が無効`) | Wrong kid, or the key was revoked with `mtlsctl eab revoke` |
-| Not allowed for this account (`このアカウント（EAB 鍵）には許可されていない`) | `names` is not covered by the EAB key's `-names` |
-| Outside the CA's domains (`この CA で発行できるドメインの範囲外`) | Check `policy.allowed_domains` and the intermediate's name constraints |
+| mtls-ca refuses to start: permissions too loose (`permissions too loose`) | `chmod 600` `intermediate.key` / `eab.json` and make mtls-ca the owner |
+| mtls-ca cannot open the database (`cannot open the database`) | Another mtls-ca is running (`certs` / `revoke` require the CA to be stopped) |
+| mtls-agent: EAB key invalid (`invalid EAB key`) | Wrong kid, or the key was revoked with `mtlsctl eab revoke` |
+| Not allowed for this account (`is not allowed for this account (EAB key)`) | `names` is not covered by the EAB key's `-names` |
+| Outside the CA's domains (`is outside the domains this CA issues`) | Check `policy.allowed_domains` and the intermediate's name constraints |
 | Validation fails with `connection` | Can the CA server reach port 80 (or 443) on the server, and resolve its name? |
 | Validation fails with `incorrectResponse` | Is another web server answering on port 80? (use `challenge.webroot`) |
 | Cannot open port 80 | Does mtls-agent have `CAP_NET_BIND_SERVICE` (granted in the bundled unit)? Is the port in use? |

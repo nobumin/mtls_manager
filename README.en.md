@@ -29,6 +29,7 @@ you need your own CA. mtls_manager aims to make in-house mTLS as easy to operate
 - **Admin web UI**: view the overview, issued certificates, EAB keys and logs in a browser. Authorized admins can also issue and revoke EAB keys and revoke certificates (without stopping the CA). Login is mTLS with certificates issued by this CA, and every access is audit-logged.
 - **Federation with other organizations**: servers managed by separate mtls-cas (separate root CAs) can also connect with mTLS, each trusting the other's root CA only within the other's scope (domains). Federations are established with fingerprint comparison and two-person approval (the admin UI checks approvers by certificate), and one person can suspend them immediately ([operations guide](docs/en/operations.md#federating-with-another-organization)).
 - **Linux first, macOS supported**: example systemd units and launchd jobs are included.
+- **Japanese and English**: logs, errors, CLI output and the admin UI are in Japanese by default and in English with the environment variable `MTLS_LANG=en` ([configuration reference](docs/en/configuration.md#message-language-environment-variable-mtls_lang)).
 
 ## Architecture
 
@@ -70,6 +71,9 @@ GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -o dist/ ./cmd/...
 ```
 
 ## Getting started
+
+> **Messages are in Japanese by default.** Set `MTLS_LANG=en` to get English logs, errors, CLI output and admin UI
+> (for systemd, add `Environment=MTLS_LANG=en` to the units; see the [configuration reference](docs/en/configuration.md#message-language-environment-variable-mtls_lang)).
 
 **Try it first**: with nothing but Docker, experience mTLS between a CA and two servers (a Go application and nginx) in about 10 minutes ([playground](docs/playground/README.en.md)).
 

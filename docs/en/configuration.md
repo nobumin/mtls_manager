@@ -7,6 +7,30 @@ Durations accept Go syntax such as `30s` / `10m` / `24h`, plus `7d` (days) and `
 Configuration files never contain secrets; keys are referenced by path.
 Tests verify that the bundled `examples/ca.example.yaml` and `examples/agent.example.yaml` load as-is.
 
+## Message language (environment variable `MTLS_LANG`)
+
+The language of logs, errors, CLI output, ACME error details and the admin UI is chosen with the environment variable `MTLS_LANG` (not a configuration file key).
+
+| Value | Language |
+| --- | --- |
+| unset or `ja` | Japanese (default) |
+| `en` | English (forms such as `en_US.UTF-8` are accepted too) |
+
+An unrecognized value (e.g. `fr`) falls back to Japanese with a warning at startup. `mtls-ca`, `mtls-agent` and `mtlsctl` all follow the same rule.
+The admin UI is shown in the language `mtls-ca` was started with (the browser's language setting does not switch it, so that the UI matches the log and error messages).
+
+- **systemd**: run `sudo systemctl edit mtls-ca` (likewise for `mtls-agent`), add the following and restart.
+
+  ```ini
+  [Service]
+  Environment=MTLS_LANG=en
+  ```
+
+- **launchd (macOS)**: add `MTLS_LANG` to `EnvironmentVariables` in the plist.
+- **sudo**: sudo does not pass environment variables by default, so use `sudo MTLS_LANG=en mtlsctl ...`,
+  or add `Defaults env_keep += "MTLS_LANG"` under `/etc/sudoers.d/`.
+- **playground (Docker)**: your PC's environment variable is passed through, as in `MTLS_LANG=en docker compose up -d` ([playground](../playground/README.en.md)).
+
 ## mtls-ca
 
 | Key | Default | Description |

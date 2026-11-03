@@ -125,6 +125,9 @@ journalctl -u mtls-ca -f
 「mtls-ca を起動した」と出れば成功です。443 番など 1024 未満のポートで待ち受ける場合は、
 ユニットファイルの `AmbientCapabilities=CAP_NET_BIND_SERVICE` を有効にします。
 
+> 表示（ログ・エラー・管理画面）は既定で日本語です。英語にするには、`daemon-reload` の前にユニットファイルの
+> `Environment=MTLS_LANG=en` のコメントを外します（`mtls-agent` も同じ。[設定リファレンス](configuration.md#表示の言語環境変数-mtls_lang)）。
+
 ファイルの配置と権限は次のとおりです。
 
 | パス | 所有者 | 権限 |

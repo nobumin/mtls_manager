@@ -7,6 +7,30 @@
 設定ファイルには秘密情報そのものを書かず、鍵などはファイルのパスで指します。
 同梱の `examples/ca.example.yaml` と `examples/agent.example.yaml` がそのまま読めることを、テストで確かめています。
 
+## 表示の言語（環境変数 `MTLS_LANG`）
+
+ログ・エラー・CLI の表示・ACME のエラーの説明・管理画面の言語は、環境変数 `MTLS_LANG` で決めます（設定ファイルの項目ではありません）。
+
+| 値 | 言語 |
+| --- | --- |
+| 未設定・`ja` | 日本語（既定） |
+| `en` | 英語（`en_US.UTF-8` のような書き方も受け付ける） |
+
+解釈できない値（例: `fr`）のときは日本語で表示し、起動時に警告を出します。`mtls-ca`・`mtls-agent`・`mtlsctl` の 3 つとも同じ決め方です。
+管理画面は、`mtls-ca` を起動したときの言語で表示します（ブラウザの言語設定では切り替わりません。ログやエラーの文言と言語をそろえるため）。
+
+- **systemd**: `sudo systemctl edit mtls-ca`（`mtls-agent` も同様）で、次を加えて再起動する。
+
+  ```ini
+  [Service]
+  Environment=MTLS_LANG=en
+  ```
+
+- **launchd（macOS）**: plist の `EnvironmentVariables` に `MTLS_LANG` を加える。
+- **sudo**: sudo は既定で環境変数を引き継がないので、`sudo MTLS_LANG=en mtlsctl ...` のように指定するか、
+  `/etc/sudoers.d/` に `Defaults env_keep += "MTLS_LANG"` を加える。
+- **playground（Docker）**: `MTLS_LANG=en docker compose up -d` のように、PC の環境変数を引き継ぐ（[playground](../playground/README.md)）。
+
 ## mtls-ca
 
 | キー | 既定値 | 内容 |

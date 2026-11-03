@@ -122,8 +122,12 @@ sudo systemctl enable --now mtls-ca
 journalctl -u mtls-ca -f
 ```
 
-The log line `mtls-ca を起動した` ("mtls-ca started") means success. To listen on a port below 1024 such as 443,
+The log line `mtls-ca started` means success. To listen on a port below 1024 such as 443,
 enable `AmbientCapabilities=CAP_NET_BIND_SERVICE` in the unit file.
+
+> Messages are in Japanese by default. For English, uncomment `Environment=MTLS_LANG=en` in the unit file before
+> `daemon-reload` (do the same for `mtls-agent`), and use `sudo MTLS_LANG=en mtlsctl ...` for the commands
+> ([configuration reference](configuration.md#message-language-environment-variable-mtls_lang)). This guide quotes the English messages.
 
 Files and permissions:
 
@@ -180,7 +184,7 @@ sudo systemctl enable --now mtls-agent
 journalctl -u mtls-agent -f
 ```
 
-The log line `証明書を更新した` ("certificate renewed") means success. Check the status with
+The log line `renewed the certificate` means success. Check the status with
 (exit code 1 if renewal is needed):
 
 ```sh
