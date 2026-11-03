@@ -222,7 +222,9 @@ func securityHeaders(next http.Handler) http.Handler {
 		h.Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("X-Frame-Options", "DENY")
-		h.Set("Referrer-Policy", "no-referrer")
+		// same-origin: 他のサイトへは Referer を送らない。no-referrer にすると、ブラウザは同じ画面からのフォームの送信にも
+		// Origin: null を付けるので、変更の操作が CSRF の確認（checkPost）で拒否されてしまう。
+		h.Set("Referrer-Policy", "same-origin")
 		h.Set("Cache-Control", "no-store")
 		h.Set("Strict-Transport-Security", "max-age=31536000")
 		next.ServeHTTP(w, r)

@@ -30,3 +30,5 @@ coverage.*
 .idea/
 .vscode/
 *.swp
+/docs/playground/out/*
+!/docs/playground/out/.gitkeep
