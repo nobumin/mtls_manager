@@ -64,6 +64,13 @@ Run the following in this directory (`docs/playground/`), in order.
 
 ## 1. Start
 
+The programs and scripts show messages in Japanese by default. This guide uses English, so first set this in the shell you use for all the steps
+(the containers and scripts pick it up; without it, everything is in Japanese):
+
+```bash
+export MTLS_LANG=en
+```
+
 ```bash
 git clone https://github.com/nobumin/mtls_manager.git
 ```
@@ -88,9 +95,8 @@ If all three are `Up`, it worked. There is no CA and no certificate yet (each co
 docker compose logs
 ```
 
-If you see `setup.sh を実行すると、…` ("run setup.sh to …"), go on to the next step.
+If you see `run setup.sh to …`, go on to the next step.
 
-> The programs log in Japanese only (v0.x). The meaning of the messages you see in this guide is given in parentheses.
 
 ## 2. Set up
 
@@ -98,7 +104,7 @@ If you see `setup.sh を実行すると、…` ("run setup.sh to …"), go on to
 ./setup.sh
 ```
 
-It takes about 10 seconds and ends with `初期設定が終わった。` (setup finished). `setup.sh` does the following:
+It takes about 10 seconds and ends with `Setup finished.` `setup.sh` does the following:
 
 | Stage | What it does |
 | --- | --- |
@@ -122,8 +128,8 @@ You can follow each server in its log:
 docker compose logs server-a server-b
 ```
 
-You will see `CA にアカウントを登録した` (registered an account with the CA) → `証明書を更新した` (renewed the certificate) →
-`証明書ができた。アプリを起動する` (certificate ready; starting the application).
+You will see `registered an account with the CA` → `renewed the certificate` →
+`certificate ready; starting the application`.
 
 ## 3. Check that it works
 
@@ -131,7 +137,7 @@ You will see `CA にアカウントを登録した` (registered an account with 
 ./check.sh
 ```
 
-It checks the following six items and ends with `6 件すべて合格` (all 6 passed) on success.
+It checks the following six items and ends with `all 6 passed` on success.
 
 | Check | Expected result |
 | --- | --- |
@@ -204,7 +210,7 @@ When asked to choose a certificate, pick `admin.admins.playground.internal`. You
 | EAB keys | Per-server permissions (the names each can obtain). You can also issue and revoke them here |
 | Logs | The CA's log (issuance, ownership checks, admin UI operations) |
 
-The admin UI is in Japanese only (v0.x). You can also open it with curl, without a browser (the hosts entry from 4-1 is needed):
+The admin UI follows `MTLS_LANG` too. You can also open it with curl, without a browser (the hosts entry from 4-1 is needed):
 
 ```bash
 curl --cacert out/root.crt --cert out/admin.crt --key out/admin.key https://ca.playground.internal:9443/
@@ -220,7 +226,7 @@ Certificates are valid for 24 hours, and mtls-agent renews them automatically wh
 docker compose exec server-b mtls-agent renew -force -config /etc/mtls-agent/config.yaml
 ```
 
-You will see `証明書を更新した` (renewed the certificate) → `更新後のコマンドを実行した` (ran the post-renewal command: an nginx reload). To check the state:
+You will see `renewed the certificate` → `ran the post-renewal command` (an nginx reload). To check the state:
 
 ```bash
 docker compose exec server-b mtls-agent check -config /etc/mtls-agent/config.yaml
@@ -285,12 +291,13 @@ To try again, start over from [1. Start](#1-start).
 
 | Symptom | What to do |
 | --- | --- |
-| `./setup.sh` stops with `… が動いていない` (… is not running) | Run `docker compose up -d --build` first, and check with `docker compose ps` that all three are `Up` |
-| `./setup.sh` stops with `すでに設定済み` (already set up) | The setup runs only once. To start over, run `docker compose down -v`, then `docker compose up -d --build` and `./setup.sh` |
-| `./setup.sh` stops with `… を待ったが、… 秒たっても終わらない` (gave up waiting for …) | Look for errors with `docker compose logs mtls-manager server-a server-b` |
+| `./setup.sh` stops with `… is not running` | Run `docker compose up -d --build` first, and check with `docker compose ps` that all three are `Up` |
+| `./setup.sh` stops with `already set up` | The setup runs only once. To start over, run `docker compose down -v`, then `docker compose up -d --build` and `./setup.sh` |
+| `./setup.sh` stops with `gave up waiting for …` | Look for errors with `docker compose logs mtls-manager server-a server-b` |
 | `docker compose up` fails with `port is already allocated` | Stop whatever uses port 9443 on your PC, or change the left side of `127.0.0.1:9443:9443` in `compose.yaml` (the port you open in the browser changes too) |
 | The browser does not offer a certificate, or shows `ERR_BAD_SSL_CLIENT_AUTH_CERT` | Check that you imported `out/admin.p12`, and restart the browser |
 | You could open the admin UI yesterday but not today (certificate error) | The administrator's certificate expires in 24 hours. Run `./renew-admin.sh` and import the new `out/admin.p12` ([5.](#renewing-the-administrators-certificate-it-expires-in-24-hours)) |
 | The browser cannot find `ca.playground.internal` | Check the hosts entry from 4-1 |
 | After rebuilding the environment you cannot get into the admin UI (certificate error) | Rebuilding creates a new root CA. Remove the old administrator's certificate and root CA from your browser / OS, and import the new `out/admin.p12` and `out/root.crt` |
 | `./setup.sh` fails with `Permission denied` | Run `chmod +x setup.sh check.sh renew-admin.sh` |
+| Messages are in Japanese | Run `export MTLS_LANG=en` in the shell you use. If the containers are already running, run `docker compose up -d` again so they pick it up |

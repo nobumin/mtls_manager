@@ -26,6 +26,7 @@ import (
 	"golang.org/x/crypto/acme"
 
 	"github.com/nobumin/mtls_manager/internal/config"
+	"github.com/nobumin/mtls_manager/internal/i18n"
 	"github.com/nobumin/mtls_manager/internal/names"
 	"github.com/nobumin/mtls_manager/internal/pki"
 	"github.com/nobumin/mtls_manager/internal/version"
@@ -59,7 +60,7 @@ func New(cfg *config.Agent, log *slog.Logger) (*Agent, error) {
 	pool := x509.NewCertPool()
 	for _, r := range roots {
 		if !r.IsCA {
-			return nil, fmt.Errorf("ca_root: %s に CA ではない証明書（%s）が含まれる", cfg.CARoot, r.Subject)
+			return nil, fmt.Errorf(i18n.T("ca_root: %s に CA ではない証明書（%s）が含まれる", "ca_root: %s contains a certificate that is not a CA (%s)"), cfg.CARoot, r.Subject)
 		}
 		pool.AddCert(r)
 	}
@@ -93,7 +94,7 @@ func (s Status) NeedsRenewal() bool { return s.Reason != "" }
 func (a *Agent) Check(now time.Time) Status {
 	certs, err := pki.LoadCerts(a.cfg.Output.Cert)
 	if err != nil {
-		return Status{Reason: "証明書が無い、または読めない"}
+		return Status{Reason: i18n.T("証明書が無い、または読めない", "certificate missing or unreadable")}
 	}
 	leaf := certs[0]
 	saved := a.loadState()
@@ -108,17 +109,17 @@ func (a *Agent) Check(now time.Time) Status {
 	}
 	switch {
 	case err != nil:
-		st.Reason = "秘密鍵が無い、または読めない"
+		st.Reason = i18n.T("秘密鍵が無い、または読めない", "private key missing or unreadable")
 	case !pki.PublicKeyEqual(leaf.PublicKey, key.Public()):
-		st.Reason = "証明書と秘密鍵が対応していない"
+		st.Reason = i18n.T("証明書と秘密鍵が対応していない", "certificate and private key do not match")
 	case !slices.Equal(normalized(leaf.DNSNames), a.cfg.Names):
-		st.Reason = fmt.Sprintf("名前が設定と違う（証明書 %v、設定 %v）", leaf.DNSNames, a.cfg.Names)
+		st.Reason = fmt.Sprintf(i18n.T("名前が設定と違う（証明書 %v、設定 %v）", "names differ from the configuration (certificate %v, configuration %v)"), leaf.DNSNames, a.cfg.Names)
 	case a.verifyChain(leaf, a.intermediates(saved)) != nil:
-		st.Reason = "ルート CA につながらない（CA が変わった可能性）"
+		st.Reason = i18n.T("ルート CA につながらない（CA が変わった可能性）", "does not chain to the root CA (the CA may have changed)")
 	case !now.Before(leaf.NotAfter):
-		st.Reason = "有効期限が切れている"
+		st.Reason = i18n.T("有効期限が切れている", "expired")
 	case !now.Before(st.RenewAt):
-		st.Reason = "更新時期を過ぎた"
+		st.Reason = i18n.T("更新時期を過ぎた", "renewal time passed")
 	}
 	return st
 }
@@ -210,11 +211,11 @@ func (a *Agent) acmeClient(ctx context.Context) (*acme.Client, error) {
 			err = nil
 		}
 		if err == nil {
-			a.log.Info("CA にアカウントを登録した", "eab_kid", a.cfg.EAB.KID)
+			a.log.Info(i18n.T("CA にアカウントを登録した", "registered an account with the CA"), "eab_kid", a.cfg.EAB.KID)
 		}
 	}
 	if err != nil {
-		return nil, fmt.Errorf("アカウントを用意できない: %w", err)
+		return nil, fmt.Errorf(i18n.T("アカウントを用意できない: %w", "cannot prepare the account: %w"), err)
 	}
 	a.client = c
 	return c, nil
@@ -238,18 +239,18 @@ func (a *Agent) accountKey() (crypto.Signer, error) {
 	if err := pki.SavePrivateKey(a.cfg.AccountKey, key); err != nil {
 		return nil, fmt.Errorf("account_key: %w", err)
 	}
-	a.log.Info("アカウント鍵を作成した", "path", a.cfg.AccountKey)
+	a.log.Info(i18n.T("アカウント鍵を作成した", "created the account key"), "path", a.cfg.AccountKey)
 	return key, nil
 }
 
 func (a *Agent) eabHMAC() ([]byte, error) {
 	if a.cfg.EAB.KID == "" {
-		return nil, errors.New("初回の登録には eab.kid が必要（mtlsctl eab create で発行する）")
+		return nil, errors.New(i18n.T("初回の登録には eab.kid が必要（mtlsctl eab create で発行する）", "the first registration requires eab.kid (issue one with mtlsctl eab create)"))
 	}
 	raw := os.Getenv(EnvEABHMAC)
 	if raw == "" {
 		if a.cfg.EAB.HMACFile == "" {
-			return nil, fmt.Errorf("初回の登録には eab.hmac_file か環境変数 %s が必要", EnvEABHMAC)
+			return nil, fmt.Errorf(i18n.T("初回の登録には eab.hmac_file か環境変数 %s が必要", "the first registration requires eab.hmac_file or the environment variable %s"), EnvEABHMAC)
 		}
 		data, err := pki.ReadPrivateFile(a.cfg.EAB.HMACFile)
 		if err != nil {
@@ -260,7 +261,7 @@ func (a *Agent) eabHMAC() ([]byte, error) {
 	raw = strings.TrimSpace(raw)
 	key, err := base64.RawURLEncoding.DecodeString(strings.TrimRight(raw, "="))
 	if err != nil {
-		return nil, errors.New("EAB の HMAC 鍵を base64url として解釈できない")
+		return nil, errors.New(i18n.T("EAB の HMAC 鍵を base64url として解釈できない", "cannot decode the EAB HMAC key as base64url"))
 	}
 	return key, nil
 }
@@ -273,7 +274,7 @@ func (a *Agent) Obtain(ctx context.Context) (err error) {
 		if needsReregistration(err) {
 			// CA 側でアカウントが失われた（データベースを古いバックアップから戻した等）。
 			// 使い回しのクライアントを捨て、次の試行で EAB による再登録からやり直す。
-			a.log.Warn("CA がアカウントを受け付けない。次の試行でアカウントを確認し直す", "err", err)
+			a.log.Warn(i18n.T("CA がアカウントを受け付けない。次の試行でアカウントを確認し直す", "the CA does not accept the account; it will be checked again on the next attempt"), "err", err)
 			a.mu.Lock()
 			a.client = nil
 			a.mu.Unlock()
@@ -285,7 +286,7 @@ func (a *Agent) Obtain(ctx context.Context) (err error) {
 	}
 	order, err := c.AuthorizeOrder(ctx, acme.DomainIDs(a.cfg.Names...))
 	if err != nil {
-		return fmt.Errorf("注文できない: %w", err)
+		return fmt.Errorf(i18n.T("注文できない: %w", "cannot place the order: %w"), err)
 	}
 
 	resp, err := newResponder(a.cfg.Challenge, c)
@@ -309,19 +310,19 @@ func (a *Agent) Obtain(ctx context.Context) (err error) {
 			}
 		}
 		if chal == nil {
-			return fmt.Errorf("CA が %s のチャレンジを提示しなかった", a.cfg.Challenge.Type)
+			return fmt.Errorf(i18n.T("CA が %s のチャレンジを提示しなかった", "the CA did not offer a %s challenge"), a.cfg.Challenge.Type)
 		}
 		if err := resp.add(chal.Token, z.Identifier.Value); err != nil {
 			return err
 		}
 		if _, err := c.Accept(ctx, chal); err != nil {
-			return fmt.Errorf("チャレンジを開始できない: %w", err)
+			return fmt.Errorf(i18n.T("チャレンジを開始できない: %w", "cannot start the challenge: %w"), err)
 		}
 		pending = append(pending, u)
 	}
 	for _, u := range pending {
 		if _, err := c.WaitAuthorization(ctx, u); err != nil {
-			return fmt.Errorf("所有確認に失敗した: %w", err)
+			return fmt.Errorf(i18n.T("所有確認に失敗した: %w", "ownership validation failed: %w"), err)
 		}
 	}
 	resp.close()
@@ -336,41 +337,41 @@ func (a *Agent) Obtain(ctx context.Context) (err error) {
 	}
 	ders, _, err := c.CreateOrderCert(ctx, order.FinalizeURL, csr, true)
 	if err != nil {
-		return fmt.Errorf("発行に失敗した: %w", err)
+		return fmt.Errorf(i18n.T("発行に失敗した: %w", "issuance failed: %w"), err)
 	}
 	chain := make([]*x509.Certificate, 0, len(ders))
 	for _, d := range ders {
 		cert, err := x509.ParseCertificate(d)
 		if err != nil {
-			return fmt.Errorf("発行された証明書を解釈できない: %w", err)
+			return fmt.Errorf(i18n.T("発行された証明書を解釈できない: %w", "cannot parse the issued certificate: %w"), err)
 		}
 		chain = append(chain, cert)
 	}
 	if err := a.checkIssued(chain, key); err != nil {
-		return fmt.Errorf("発行された証明書が想定と違う: %w", err)
+		return fmt.Errorf(i18n.T("発行された証明書が想定と違う: %w", "the issued certificate is not as expected: %w"), err)
 	}
 	// 内部状態を先に保存する（失敗したら出力を書き換えずにやり直す）。
 	if err := a.saveState(chain[0], chain[1:], time.Now()); err != nil {
-		return fmt.Errorf("内部状態を保存できない: %w", err)
+		return fmt.Errorf(i18n.T("内部状態を保存できない: %w", "cannot save the internal state: %w"), err)
 	}
 	if err := a.write(chain, key); err != nil {
-		return fmt.Errorf("証明書を書き出せない: %w", err)
+		return fmt.Errorf(i18n.T("証明書を書き出せない: %w", "cannot write the certificate: %w"), err)
 	}
-	a.log.Info("証明書を更新した", "names", a.cfg.Names, "serial", serialHex(chain[0]), "not_after", chain[0].NotAfter)
+	a.log.Info(i18n.T("証明書を更新した", "renewed the certificate"), "names", a.cfg.Names, "serial", serialHex(chain[0]), "not_after", chain[0].NotAfter)
 	a.runHook(ctx)
 	return nil
 }
 
 func (a *Agent) checkIssued(chain []*x509.Certificate, key crypto.Signer) error {
 	if len(chain) == 0 {
-		return errors.New("証明書が空")
+		return errors.New(i18n.T("証明書が空", "the certificate is empty"))
 	}
 	leaf := chain[0]
 	if !pki.PublicKeyEqual(leaf.PublicKey, key.Public()) {
-		return errors.New("公開鍵が一致しない")
+		return errors.New(i18n.T("公開鍵が一致しない", "public key does not match"))
 	}
 	if !slices.Equal(normalized(leaf.DNSNames), a.cfg.Names) {
-		return fmt.Errorf("名前が一致しない（%v）", leaf.DNSNames)
+		return fmt.Errorf(i18n.T("名前が一致しない（%v）", "names do not match (%v)"), leaf.DNSNames)
 	}
 	return a.verifyChain(leaf, chain[1:])
 }
@@ -428,10 +429,10 @@ func (a *Agent) runHook(ctx context.Context) {
 	var buf bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &buf, &buf
 	if err := cmd.Run(); err != nil {
-		a.log.Error("更新後のコマンドが失敗した", "command", argv, "err", err, "output", truncate(buf.String(), 2000))
+		a.log.Error(i18n.T("更新後のコマンドが失敗した", "the post-renewal command failed"), "command", argv, "err", err, "output", truncate(buf.String(), 2000))
 		return
 	}
-	a.log.Info("更新後のコマンドを実行した", "command", argv)
+	a.log.Info(i18n.T("更新後のコマンドを実行した", "ran the post-renewal command"), "command", argv)
 }
 
 func truncate(s string, n int) string {
@@ -479,21 +480,21 @@ func (a *Agent) Run(ctx context.Context, renewNow <-chan struct{}) {
 		if st.NeedsRenewal() || force {
 			reason := st.Reason
 			if force {
-				reason = "手動での更新要求"
+				reason = i18n.T("手動での更新要求", "manual renewal request")
 			}
-			a.log.Info("証明書を取得する", "reason", reason)
+			a.log.Info(i18n.T("証明書を取得する", "obtaining a certificate"), "reason", reason)
 			if err := a.Obtain(ctx); err != nil {
 				if ctx.Err() != nil {
 					return
 				}
 				wait = jitter(failure.next())
-				a.log.Error("証明書を取得できない（再試行する）", "err", err, "retry_in", wait.Round(time.Second))
+				a.log.Error(i18n.T("証明書を取得できない（再試行する）", "cannot obtain a certificate (will retry)"), "err", err, "retry_in", wait.Round(time.Second))
 			} else {
 				force = false
 				failure.reset()
 				if after := a.Check(time.Now()); after.NeedsRenewal() {
 					wait = jitter(max(a.cfg.Renew.CheckInterval.D(), safety.next()))
-					a.log.Warn("取得した直後なのに更新が必要と判断された。設定と CA の状態を確認すること",
+					a.log.Warn(i18n.T("取得した直後なのに更新が必要と判断された。設定と CA の状態を確認すること", "renewal is judged necessary right after obtaining a certificate; check the configuration and the CA"),
 						"reason", after.Reason, "retry_in", wait)
 				} else {
 					safety.reset()
@@ -503,7 +504,7 @@ func (a *Agent) Run(ctx context.Context, renewNow <-chan struct{}) {
 		} else {
 			safety.reset()
 			wait = min(a.cfg.Renew.CheckInterval.D(), time.Until(st.RenewAt))
-			a.log.Debug("更新は不要", "renew_at", st.RenewAt, "not_after", st.NotAfter)
+			a.log.Debug(i18n.T("更新は不要", "no renewal needed"), "renew_at", st.RenewAt, "not_after", st.NotAfter)
 		}
 		t := time.NewTimer(max(wait, time.Second))
 		select {

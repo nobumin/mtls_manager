@@ -48,6 +48,12 @@ jobs:
         with:
           go-version: ${{ matrix.go }}
       - run: go test -race -count=1 ./...
+      # 開発者のシェルで MTLS_LANG=en を設定していても、テストが通ること（テストは日本語の文言を照合するので、TestMain で日本語に固定している）
+      - name: MTLS_LANG=en でもテストが通る
+        if: matrix.os == 'ubuntu-latest' && matrix.go == 'stable'
+        run: go test -count=1 ./...
+        env:
+          MTLS_LANG: en
 
   interop:
     name: 相互接続試験（lego）

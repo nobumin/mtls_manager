@@ -23,6 +23,7 @@ import (
 	"github.com/nobumin/mtls_manager/internal/config"
 	"github.com/nobumin/mtls_manager/internal/eab"
 	"github.com/nobumin/mtls_manager/internal/federation"
+	"github.com/nobumin/mtls_manager/internal/i18n"
 	"github.com/nobumin/mtls_manager/internal/pki"
 	"github.com/nobumin/mtls_manager/internal/store"
 )
@@ -178,7 +179,7 @@ func (c *CA) RemoveEAB(t testing.TB, kid string) {
 		t.Fatal(err)
 	}
 	if !f.Remove(kid) {
-		t.Fatalf("EAB 鍵 %s が無い", kid)
+		t.Fatalf(i18n.T("EAB 鍵 %s が無い", "no EAB key %s"), kid)
 	}
 	if err := f.Save(c.EABFile); err != nil {
 		t.Fatal(err)

@@ -6,6 +6,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+
+	"github.com/nobumin/mtls_manager/internal/i18n"
 )
 
 // CheckPrivateFile は秘密情報のファイルが所有者以外から読み書きできないこと（0600 相当）を確かめる。
@@ -16,10 +18,10 @@ func CheckPrivateFile(path string) error {
 		return err
 	}
 	if !fi.Mode().IsRegular() {
-		return fmt.Errorf("%s: 通常のファイルではない", path)
+		return fmt.Errorf(i18n.T("%s: 通常のファイルではない", "%s: not a regular file"), path)
 	}
 	if perm := fi.Mode().Perm(); perm&0o077 != 0 {
-		return fmt.Errorf("%s: 権限が緩すぎる（%04o）。chmod 600 %s を実行すること", path, perm, path)
+		return fmt.Errorf(i18n.T("%s: 権限が緩すぎる（%04o）。chmod 600 %s を実行すること", "%s: permissions too loose (%04o); run chmod 600 %s"), path, perm, path)
 	}
 	return nil
 }
@@ -75,7 +77,7 @@ func WriteNewFile(path string, data []byte, perm fs.FileMode) error {
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, perm)
 	if err != nil {
 		if errors.Is(err, fs.ErrExist) {
-			return fmt.Errorf("%s はすでに存在する（上書きしない）", path)
+			return fmt.Errorf(i18n.T("%s はすでに存在する（上書きしない）", "%s already exists (not overwriting)"), path)
 		}
 		return err
 	}

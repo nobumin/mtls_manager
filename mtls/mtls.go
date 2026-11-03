@@ -4,6 +4,9 @@
 //   - サーバ側はクライアント証明書を必須にし、相手の名前を許可リストで確かめる
 //   - 既定で TLS 1.3 以上
 //
+// エラー文とログの文言は、このライブラリを組み込んだアプリのプロセスの環境変数 MTLS_LANG に従う
+// （既定は日本語、MTLS_LANG=en で英語）。エラーの文言で処理を分けないこと。
+//
 // サーバの例:
 //
 //	cfg, err := mtls.NewServerTLSConfig(mtls.Config{
@@ -39,6 +42,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/nobumin/mtls_manager/internal/i18n"
 	"github.com/nobumin/mtls_manager/internal/names"
 )
 
@@ -80,13 +84,13 @@ type Config struct {
 
 func (c *Config) defaults() error {
 	if c.CertFile == "" || c.KeyFile == "" || c.CAFile == "" {
-		return errors.New("mtls: CertFile / KeyFile / CAFile は必須")
+		return errors.New(i18n.T("mtls: CertFile / KeyFile / CAFile は必須", "mtls: CertFile / KeyFile / CAFile are required"))
 	}
 	if c.MinVersion == 0 {
 		c.MinVersion = tls.VersionTLS13
 	}
 	if c.MinVersion < tls.VersionTLS12 {
-		return errors.New("mtls: MinVersion は TLS 1.2 以上")
+		return errors.New(i18n.T("mtls: MinVersion は TLS 1.2 以上", "mtls: MinVersion must be TLS 1.2 or later"))
 	}
 	if c.ReloadInterval == 0 {
 		c.ReloadInterval = 30 * time.Second
@@ -112,7 +116,7 @@ func NewServerTLSConfig(c Config) (*tls.Config, error) {
 		return nil, err
 	}
 	if len(c.AllowedPeers) == 0 && !c.AllowAnyPeer {
-		return nil, errors.New("mtls: サーバ側は AllowedPeers で接続を許可する相手を指定する（すべて許可するなら AllowAnyPeer）")
+		return nil, errors.New(i18n.T("mtls: サーバ側は AllowedPeers で接続を許可する相手を指定する（すべて許可するなら AllowAnyPeer）", "mtls: servers must specify allowed peers with AllowedPeers (use AllowAnyPeer to allow everyone)"))
 	}
 	pool, err := LoadCAPool(c.CAFile)
 	if err != nil {
@@ -193,7 +197,7 @@ func LoadCAPool(path string) (*x509.CertPool, error) {
 	}
 	pool := x509.NewCertPool()
 	if !pool.AppendCertsFromPEM(data) {
-		return nil, fmt.Errorf("mtls: %s に証明書が無い", path)
+		return nil, fmt.Errorf(i18n.T("mtls: %s に証明書が無い", "mtls: no certificate in %s"), path)
 	}
 	return pool, nil
 }
@@ -204,14 +208,14 @@ func VerifyPeer(patterns []string) func(tls.ConnectionState) error {
 	patterns = slices.Clone(patterns)
 	return func(cs tls.ConnectionState) error {
 		if len(cs.PeerCertificates) == 0 {
-			return errors.New("mtls: 相手が証明書を提示しなかった")
+			return errors.New(i18n.T("mtls: 相手が証明書を提示しなかった", "mtls: the peer presented no certificate"))
 		}
 		for _, n := range cs.PeerCertificates[0].DNSNames {
 			if names.MatchAny(patterns, names.Normalize(n)) {
 				return nil
 			}
 		}
-		return fmt.Errorf("mtls: 相手 %v は許可されていない", cs.PeerCertificates[0].DNSNames)
+		return fmt.Errorf(i18n.T("mtls: 相手 %v は許可されていない", "mtls: peer %v is not allowed"), cs.PeerCertificates[0].DNSNames)
 	}
 }
 
@@ -253,7 +257,7 @@ func NewSource(certFile, keyFile string, interval time.Duration, log *slog.Logge
 	}
 	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
 	if err != nil {
-		return nil, fmt.Errorf("mtls: 証明書を読めない: %w", err)
+		return nil, fmt.Errorf(i18n.T("mtls: 証明書を読めない: %w", "mtls: cannot read the certificate: %w"), err)
 	}
 	s.cur.Store(&cert)
 	s.stamp, s.lastCheck = stamp, time.Now()
@@ -295,7 +299,7 @@ func (s *Source) Reload() {
 func (s *Source) reloadLocked() {
 	stamp, err := s.fileStamp()
 	if err != nil {
-		s.log.Warn("mtls: 証明書ファイルを確認できない（直前の証明書を使い続ける）", "err", err)
+		s.log.Warn(i18n.T("mtls: 証明書ファイルを確認できない（直前の証明書を使い続ける）", "mtls: cannot check the certificate file (keeps using the previous certificate)"), "err", err)
 		return
 	}
 	if stamp == s.stamp {
@@ -303,13 +307,13 @@ func (s *Source) reloadLocked() {
 	}
 	cert, err := tls.LoadX509KeyPair(s.certFile, s.keyFile)
 	if err != nil {
-		s.log.Warn("mtls: 証明書を読み直せない（直前の証明書を使い続ける）", "err", err)
+		s.log.Warn(i18n.T("mtls: 証明書を読み直せない（直前の証明書を使い続ける）", "mtls: cannot reload the certificate (keeps using the previous certificate)"), "err", err)
 		return
 	}
 	s.cur.Store(&cert)
 	s.stamp = stamp
 	if cert.Leaf != nil {
-		s.log.Info("mtls: 証明書を読み直した", "names", cert.Leaf.DNSNames, "not_after", cert.Leaf.NotAfter)
+		s.log.Info(i18n.T("mtls: 証明書を読み直した", "mtls: reloaded the certificate"), "names", cert.Leaf.DNSNames, "not_after", cert.Leaf.NotAfter)
 	}
 }
 

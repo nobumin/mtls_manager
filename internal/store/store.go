@@ -11,6 +11,8 @@ import (
 	"time"
 
 	bolt "go.etcd.io/bbolt"
+
+	"github.com/nobumin/mtls_manager/internal/i18n"
 )
 
 // ErrNotFound はレコードが無いことを表す。
@@ -115,7 +117,7 @@ func Open(dir string) (*DB, error) {
 	}
 	b, err := bolt.Open(filepath.Join(dir, "mtls-ca.db"), 0o600, &bolt.Options{Timeout: 5 * time.Second})
 	if err != nil {
-		return nil, fmt.Errorf("データベースを開けない（別の mtls-ca が動いていないか確認する）: %w", err)
+		return nil, fmt.Errorf(i18n.T("データベースを開けない（別の mtls-ca が動いていないか確認する）: %w", "cannot open the database (check that no other mtls-ca is running): %w"), err)
 	}
 	err = b.Update(func(tx *bolt.Tx) error {
 		for _, name := range [][]byte{bucketAccounts, bucketThumbs, bucketOrders, bucketAuthzs, bucketCerts} {
@@ -272,7 +274,7 @@ func (d *DB) ReserveCert(c *Cert) error {
 	c.Pending = true
 	return d.bolt.Update(func(tx *bolt.Tx) error {
 		if tx.Bucket(bucketCerts).Get([]byte(c.Serial)) != nil {
-			return fmt.Errorf("シリアル %s はすでに使われている", c.Serial)
+			return fmt.Errorf(i18n.T("シリアル %s はすでに使われている", "serial %s is already in use"), c.Serial)
 		}
 		return put(tx, bucketCerts, c.Serial, c)
 	})
@@ -396,7 +398,7 @@ func (d *DB) Cleanup(now time.Time, retention time.Duration) (removed int, err e
 }
 
 // ErrAlreadyRevoked はすでに失効していることを表す。
-var ErrAlreadyRevoked = errors.New("すでに失効している")
+var ErrAlreadyRevoked = i18n.Error("すでに失効している", "already revoked")
 
 // RevocationReasons は受け付ける失効理由（RFC 5280 §5.3.1）。
 // 0: 指定なし, 1: 鍵の漏えい, 3: 所属の変更, 4: 置き換え, 5: 運用停止。
@@ -409,7 +411,7 @@ func ValidRevocationReason(reason int) bool { return slices.Contains(RevocationR
 // 失効の記録は ACME の revokeCert と mtls-ca revoke の両方がこれを通る。
 func (d *DB) RevokeCert(serial string, reason int, check func(*Cert) error) error {
 	if !ValidRevocationReason(reason) {
-		return fmt.Errorf("失効理由 %d は受け付けない（%v）", reason, RevocationReasons)
+		return fmt.Errorf(i18n.T("失効理由 %d は受け付けない（%v）", "revocation reason %d is not accepted (%v)"), reason, RevocationReasons)
 	}
 	_, err := d.UpdateCert(serial, func(c *Cert) error {
 		if check != nil {

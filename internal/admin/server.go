@@ -28,6 +28,7 @@ import (
 	"github.com/nobumin/mtls_manager/internal/config"
 	"github.com/nobumin/mtls_manager/internal/eab"
 	"github.com/nobumin/mtls_manager/internal/federation"
+	"github.com/nobumin/mtls_manager/internal/i18n"
 	"github.com/nobumin/mtls_manager/internal/logbuf"
 	"github.com/nobumin/mtls_manager/internal/names"
 	"github.com/nobumin/mtls_manager/internal/pki"
@@ -80,10 +81,10 @@ type Server struct {
 // New は Server を作る。
 func New(o Options) (*Server, error) {
 	if o.Config == nil || o.Issuer == nil || o.DB == nil || o.EAB == nil || o.Logs == nil {
-		return nil, errors.New("admin: Config / Issuer / DB / EAB / Logs は必須")
+		return nil, errors.New(i18n.T("admin: Config / Issuer / DB / EAB / Logs は必須", "admin: Config / Issuer / DB / EAB / Logs are required"))
 	}
 	if len(o.Config.Admin.AllowedClients) == 0 {
-		return nil, errors.New("admin: admin.allowed_clients が空")
+		return nil, errors.New(i18n.T("admin: admin.allowed_clients が空", "admin: admin.allowed_clients is empty"))
 	}
 	log := o.Logger
 	if log == nil {
@@ -99,19 +100,19 @@ func New(o Options) (*Server, error) {
 	}
 	if len(s.operators) > 0 {
 		if s.revoke == nil {
-			return nil, errors.New("admin: admin.operators を指定する場合は Revoke が必須")
+			return nil, errors.New(i18n.T("admin: admin.operators を指定する場合は Revoke が必須", "admin: Revoke is required when admin.operators is set"))
 		}
 		if err := checkWritable(filepath.Dir(o.Config.EABFile)); err != nil {
-			return nil, fmt.Errorf("admin.operators を使うには、eab_file のディレクトリに mtls-ca が書き込める必要がある: %w", err)
+			return nil, fmt.Errorf(i18n.T("admin.operators を使うには、eab_file のディレクトリに mtls-ca が書き込める必要がある: %w", "to use admin.operators, mtls-ca must be able to write to the directory of eab_file: %w"), err)
 		}
 		// ロックをかけて読めることも確かめる（root の mtlsctl が作ったロックファイルを開けないなど）。
 		errCheck := errors.New("check")
 		if err := eab.Update(o.Config.EABFile, func(*eab.File) error { return errCheck }); !errors.Is(err, errCheck) {
-			return nil, fmt.Errorf("admin.operators を使うには、mtls-ca が eab_file を更新できる必要がある: %w", err)
+			return nil, fmt.Errorf(i18n.T("admin.operators を使うには、mtls-ca が eab_file を更新できる必要がある: %w", "to use admin.operators, mtls-ca must be able to update eab_file: %w"), err)
 		}
 		if s.cfg.Federation.File != "" && s.fed != nil {
 			if err := checkFederationWritable(s.cfg.Federation.File); err != nil {
-				return nil, fmt.Errorf("admin.operators を使うには、%w", err)
+				return nil, fmt.Errorf(i18n.T("admin.operators を使うには、%w", "to use admin.operators: %w"), err)
 			}
 		}
 	}
@@ -181,7 +182,7 @@ func (s *Server) restrictSource(next http.Handler) http.Handler {
 				}
 			}
 		}
-		s.log.Warn("管理画面: 許可されていない送信元からの接続を拒否", "category", "audit", "remote", r.RemoteAddr)
+		s.log.Warn(i18n.T("管理画面: 許可されていない送信元からの接続を拒否", "admin UI: refused a connection from a disallowed source"), "category", "audit", "remote", r.RemoteAddr)
 		http.Error(w, "forbidden", http.StatusForbidden)
 	})
 }
@@ -192,14 +193,14 @@ func (s *Server) requireAdmin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		peers := mtls.PeerNames(r.TLS)
 		if len(peers) == 0 {
-			s.log.Warn("管理画面: クライアント証明書のない接続を拒否", "category", "audit", "remote", r.RemoteAddr)
+			s.log.Warn(i18n.T("管理画面: クライアント証明書のない接続を拒否", "admin UI: refused a connection without a client certificate"), "category", "audit", "remote", r.RemoteAddr)
 			http.Error(w, "client certificate required", http.StatusUnauthorized)
 			return
 		}
 		// 失効させた管理者の証明書では入れない。管理画面は CA と同じプロセスで発行の記録を持っているので、
 		// CRL を使わずにその場で確かめられる。この CA の発行の記録に無い証明書も拒否する。
 		if reason := s.certRejected(r.TLS.PeerCertificates[0]); reason != "" {
-			s.log.Warn("管理画面: "+reason+"での接続を拒否", "category", "audit", "admin", peers[0],
+			s.log.Warn(fmt.Sprintf(i18n.T("管理画面: %sでの接続を拒否", "admin UI: refused a connection with a %s"), reason), "category", "audit", "admin", peers[0],
 				"serial", fmt.Sprintf("%x", r.TLS.PeerCertificates[0].SerialNumber), "remote", r.RemoteAddr)
 			http.Error(w, "forbidden: "+reason, http.StatusForbidden)
 			return
@@ -209,7 +210,7 @@ func (s *Server) requireAdmin(next http.Handler) http.Handler {
 		if r.URL.Path == "/api/logs" {
 			level = slog.LevelDebug
 		}
-		s.log.Log(r.Context(), level, "管理画面へのアクセス", "category", "audit",
+		s.log.Log(r.Context(), level, i18n.T("管理画面へのアクセス", "admin UI access"), "category", "audit",
 			"admin", peers[0], "method", r.Method, "path", r.URL.Path, "remote", r.RemoteAddr)
 		next.ServeHTTP(w, r)
 	})
@@ -249,7 +250,7 @@ func (s *Server) page(name string, load func(*http.Request) (any, error)) http.H
 	return func(w http.ResponseWriter, r *http.Request) {
 		data, err := load(r)
 		if err != nil {
-			s.log.Error("管理画面: データを読めない", "page", name, "err", err)
+			s.log.Error(i18n.T("管理画面: データを読めない", "admin UI: cannot read data"), "page", name, "err", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
@@ -257,18 +258,35 @@ func (s *Server) page(name string, load func(*http.Request) (any, error)) http.H
 	}
 }
 
-var titles = map[string]string{"dashboard": "概要", "certs": "発行済み証明書", "eab": "EAB 鍵", "logs": "ログ", "eab_created": "EAB 鍵を発行した", "federation": "連携"}
+// pageTitle は画面の見出し（表示のたびに、そのときの言語で決める）。
+func pageTitle(name string) string {
+	switch name {
+	case "dashboard":
+		return i18n.T("概要", "Overview")
+	case "certs":
+		return i18n.T("発行済み証明書", "Issued certificates")
+	case "eab":
+		return i18n.T("EAB 鍵", "EAB keys")
+	case "logs":
+		return i18n.T("ログ", "Logs")
+	case "eab_created":
+		return i18n.T("EAB 鍵を発行した", "EAB key issued")
+	case "federation":
+		return i18n.T("連携", "Federation")
+	}
+	return name
+}
 
 func (s *Server) render(w http.ResponseWriter, r *http.Request, status int, name string, data any, flash string, flashBad bool) {
 	admin := mtls.PeerNames(r.TLS)[0]
 	pd := pageData{
-		Title: titles[name], Page: name, Admin: admin, Version: version.Version, Now: time.Now(),
+		Title: pageTitle(name), Page: name, Admin: admin, Version: version.Version, Now: time.Now(),
 		Operator: s.isOperator(admin), CSRF: s.csrfToken(admin), Once: newOnce(), Flash: flash, FlashBad: flashBad, Data: data,
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)
 	if err := s.tmpl[name].Execute(w, pd); err != nil {
-		s.log.Error("管理画面: 画面を作れない", "page", name, "err", err)
+		s.log.Error(i18n.T("管理画面: 画面を作れない", "admin UI: cannot render the page"), "page", name, "err", err)
 	}
 }
 
@@ -277,14 +295,14 @@ func (s *Server) certRejected(c *x509.Certificate) string {
 	rec, err := s.db.Cert(fmt.Sprintf("%x", c.SerialNumber))
 	switch {
 	case errors.Is(err, store.ErrNotFound):
-		return "発行の記録が無い証明書"
+		return i18n.T("発行の記録が無い証明書", "certificate with no issuance record")
 	case err != nil:
-		s.log.Error("管理画面: 発行の記録を読めない", "err", err)
-		return "発行の記録を確かめられない証明書"
+		s.log.Error(i18n.T("管理画面: 発行の記録を読めない", "admin UI: cannot read the issuance record"), "err", err)
+		return i18n.T("発行の記録を確かめられない証明書", "certificate whose issuance record cannot be checked")
 	case rec.Revoked:
-		return "失効した証明書"
+		return i18n.T("失効した証明書", "revoked certificate")
 	case rec.Pending:
-		return "発行を完了していない証明書"
+		return i18n.T("発行を完了していない証明書", "certificate whose issuance was not completed")
 	}
 	return s.eabRejected(rec, c)
 }
@@ -297,21 +315,21 @@ func (s *Server) eabRejected(rec *store.Cert, c *x509.Certificate) string {
 	acct, err := s.db.Account(rec.AccountID)
 	if err != nil {
 		if !errors.Is(err, store.ErrNotFound) {
-			s.log.Error("管理画面: アカウントを読めない", "err", err)
+			s.log.Error(i18n.T("管理画面: アカウントを読めない", "admin UI: cannot read the account"), "err", err)
 		}
-		return "発行したアカウントを確かめられない証明書"
+		return i18n.T("発行したアカウントを確かめられない証明書", "certificate whose issuing account cannot be checked")
 	}
 	k, ok, err := s.eab.Lookup(acct.EABKeyID)
 	switch {
 	case err != nil:
-		s.log.Error("管理画面: EAB 鍵ファイルを読めない", "err", err)
-		return "EAB 鍵を確かめられない証明書"
+		s.log.Error(i18n.T("管理画面: EAB 鍵ファイルを読めない", "admin UI: cannot read the EAB key file"), "err", err)
+		return i18n.T("EAB 鍵を確かめられない証明書", "certificate whose EAB key cannot be checked")
 	case !ok:
-		return "取り消した EAB 鍵で発行した証明書"
+		return i18n.T("取り消した EAB 鍵で発行した証明書", "certificate issued with a revoked EAB key")
 	}
 	for _, n := range c.DNSNames {
 		if names.MatchAny(s.cfg.Admin.AllowedClients, n) && !k.PermitsExactly(n) {
-			return "管理者の名前を完全一致で許可していない EAB 鍵で発行した証明書"
+			return i18n.T("管理者の名前を完全一致で許可していない EAB 鍵で発行した証明書", "certificate issued with an EAB key that does not allow the administrator name by exact match")
 		}
 	}
 	return ""

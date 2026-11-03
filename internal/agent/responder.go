@@ -17,6 +17,7 @@ import (
 	"golang.org/x/crypto/acme"
 
 	"github.com/nobumin/mtls_manager/internal/config"
+	"github.com/nobumin/mtls_manager/internal/i18n"
 )
 
 // responder はチャレンジに応答する。所有確認の間だけ待ち受ける（またはファイルを置く）。
@@ -40,7 +41,7 @@ func newResponder(cfg config.AgentChallenge, c *acme.Client) (*responder, error)
 	case config.ChallengeHTTP01:
 		ln, err := net.Listen("tcp", cfg.Listen)
 		if err != nil {
-			return nil, fmt.Errorf("http-01 の応答用に %s を開けない（権限・ポートの競合を確認する）: %w", cfg.Listen, err)
+			return nil, fmt.Errorf(i18n.T("http-01 の応答用に %s を開けない（権限・ポートの競合を確認する）: %w", "cannot open %s to answer http-01 (check permissions and port conflicts): %w"), cfg.Listen, err)
 		}
 		srv := &http.Server{Handler: http.HandlerFunc(r.serveHTTP01), ReadHeaderTimeout: 10 * time.Second}
 		go func() { _ = srv.Serve(ln) }()
@@ -52,7 +53,7 @@ func newResponder(cfg config.AgentChallenge, c *acme.Client) (*responder, error)
 			GetCertificate: r.alpnCertificate,
 		})
 		if err != nil {
-			return nil, fmt.Errorf("tls-alpn-01 の応答用に %s を開けない（権限・ポートの競合を確認する）: %w", cfg.Listen, err)
+			return nil, fmt.Errorf(i18n.T("tls-alpn-01 の応答用に %s を開けない（権限・ポートの競合を確認する）: %w", "cannot open %s to answer tls-alpn-01 (check permissions and port conflicts): %w"), cfg.Listen, err)
 		}
 		go func() {
 			for {
@@ -102,7 +103,7 @@ func (r *responder) writeWebroot(urlPath, body string) error {
 	rel := strings.TrimPrefix(urlPath, "/")
 	full := filepath.Join(r.cfg.Webroot, filepath.FromSlash(rel))
 	if !strings.HasPrefix(full, filepath.Clean(r.cfg.Webroot)+string(filepath.Separator)) {
-		return errors.New("webroot の外に書こうとした")
+		return errors.New(i18n.T("webroot の外に書こうとした", "attempted to write outside the webroot"))
 	}
 	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
 		return err
@@ -130,13 +131,13 @@ func (r *responder) serveHTTP01(w http.ResponseWriter, req *http.Request) {
 
 func (r *responder) alpnCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
 	if !slices.Contains(hello.SupportedProtos, acme.ALPNProto) {
-		return nil, errors.New("acme-tls/1 以外の接続は受け付けない")
+		return nil, errors.New(i18n.T("acme-tls/1 以外の接続は受け付けない", "only acme-tls/1 connections are accepted"))
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	cert, ok := r.alpn[strings.ToLower(hello.ServerName)]
 	if !ok {
-		return nil, fmt.Errorf("%q の検証用証明書が無い", hello.ServerName)
+		return nil, fmt.Errorf(i18n.T("%q の検証用証明書が無い", "no validation certificate for %q"), hello.ServerName)
 	}
 	return &cert, nil
 }

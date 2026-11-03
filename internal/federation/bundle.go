@@ -21,6 +21,7 @@ import (
 
 	jose "github.com/go-jose/go-jose/v4"
 
+	"github.com/nobumin/mtls_manager/internal/i18n"
 	"github.com/nobumin/mtls_manager/internal/pki"
 )
 
@@ -35,7 +36,7 @@ const (
 )
 
 // ErrBundleExpired はバンドルの有効期限が切れていることを表す。連携先のルートだけを外す（自分のルートは信頼し続ける）。
-var ErrBundleExpired = errors.New("トラストバンドルの有効期限が切れている")
+var ErrBundleExpired = i18n.Error("トラストバンドルの有効期限が切れている", "the trust bundle has expired")
 
 // Bundle は CA が各サーバへ配るトラストバンドル。中間 CA の鍵で署名した JWS（compact）として配る。
 // 自分のルート CA と範囲は、バンドルからは取らない（OwnRoots は照合のための参照）。
@@ -111,7 +112,7 @@ func algFor(key crypto.Signer) (jose.SignatureAlgorithm, error) {
 	case ed25519.PublicKey:
 		return jose.EdDSA, nil
 	}
-	return "", errors.New("中間 CA の鍵の種類に対応していない")
+	return "", errors.New(i18n.T("中間 CA の鍵の種類に対応していない", "unsupported intermediate CA key type"))
 }
 
 // Sign はバンドルに中間 CA の鍵で署名する（x5c に中間 CA の証明書を入れる）。
@@ -146,17 +147,17 @@ func Sign(b *Bundle, inter *x509.Certificate, key crypto.Signer) (string, error)
 // エポックと連番の比較（古いバンドルの再送の拒否）は、状態を持つ呼び出し側（mtls-agent）が行う。
 func Verify(compact string, o VerifyOptions) (*Verified, error) {
 	if len(o.OwnRoots) == 0 {
-		return nil, errors.New("自分のルート CA が無い")
+		return nil, errors.New(i18n.T("自分のルート CA が無い", "own root CA is missing"))
 	}
 	if len(o.SignerConstraints) == 0 {
-		return nil, errors.New("自分の中間 CA の名前制約が無いので、バンドルの署名者を確かめられない")
+		return nil, errors.New(i18n.T("自分の中間 CA の名前制約が無いので、バンドルの署名者を確かめられない", "your own intermediate CA has no name constraints, so the bundle signer cannot be checked"))
 	}
 	jws, err := jose.ParseSigned(compact, signingAlgs)
 	if err != nil {
-		return nil, fmt.Errorf("トラストバンドルを解釈できない: %w", err)
+		return nil, fmt.Errorf(i18n.T("トラストバンドルを解釈できない: %w", "cannot parse the trust bundle: %w"), err)
 	}
 	if len(jws.Signatures) != 1 {
-		return nil, errors.New("トラストバンドルの署名は 1 つにする")
+		return nil, errors.New(i18n.T("トラストバンドルの署名は 1 つにする", "the trust bundle must have exactly one signature"))
 	}
 	pool := x509.NewCertPool()
 	for _, r := range o.OwnRoots {
@@ -166,32 +167,32 @@ func Verify(compact string, o VerifyOptions) (*Verified, error) {
 		Roots: pool, CurrentTime: o.Now, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
 	})
 	if err != nil {
-		return nil, fmt.Errorf("トラストバンドルの署名者を、自分のルート CA で検証できない: %w", err)
+		return nil, fmt.Errorf(i18n.T("トラストバンドルの署名者を、自分のルート CA で検証できない: %w", "cannot verify the trust bundle signer with your own root CA: %w"), err)
 	}
 	signer := chains[0][0]
 	if !signer.IsCA || !slices.Equal(sortedUnique(normalizeAll(signer.PermittedDNSDomains)), sortedUnique(normalizeAll(o.SignerConstraints))) {
-		return nil, errors.New("トラストバンドルの署名者が、自分の中間 CA（同じ名前制約）ではない")
+		return nil, errors.New(i18n.T("トラストバンドルの署名者が、自分の中間 CA（同じ名前制約）ではない", "the trust bundle signer is not your own intermediate CA (same name constraints)"))
 	}
 	payload, err := jws.Verify(signer.PublicKey)
 	if err != nil {
-		return nil, fmt.Errorf("トラストバンドルの署名が正しくない: %w", err)
+		return nil, fmt.Errorf(i18n.T("トラストバンドルの署名が正しくない: %w", "invalid trust bundle signature: %w"), err)
 	}
 	var b Bundle
 	if err := json.Unmarshal(payload, &b); err != nil {
-		return nil, fmt.Errorf("トラストバンドルを解釈できない: %w", err)
+		return nil, fmt.Errorf(i18n.T("トラストバンドルを解釈できない: %w", "cannot parse the trust bundle: %w"), err)
 	}
 	if b.Format != BundleFormat {
-		return nil, fmt.Errorf("トラストバンドルの形式 %q に対応していない", b.Format)
+		return nil, fmt.Errorf(i18n.T("トラストバンドルの形式 %q に対応していない", "unsupported trust bundle format %q"), b.Format)
 	}
 	if b.Epoch == "" || b.Seq == 0 || b.IssuedAt.IsZero() || !b.Expires.After(b.IssuedAt) {
-		return nil, errors.New("トラストバンドルのエポック・連番・発行時刻・有効期限が不正")
+		return nil, errors.New(i18n.T("トラストバンドルのエポック・連番・発行時刻・有効期限が不正", "invalid trust bundle epoch, sequence, issue time or expiry"))
 	}
 	if len(b.OwnRoots) == 0 {
-		return nil, errors.New("トラストバンドルに自分のルート CA の指紋が無い")
+		return nil, errors.New(i18n.T("トラストバンドルに自分のルート CA の指紋が無い", "the trust bundle has no fingerprint of your own root CA"))
 	}
 	for _, fp := range b.OwnRoots {
 		if !slices.ContainsFunc(o.OwnRoots, func(r *x509.Certificate) bool { return FingerprintEqual(fp, Fingerprint(r)) }) {
-			return nil, fmt.Errorf("トラストバンドルの自分のルート CA（%s）が、CAFile のルート CA に無い", fp)
+			return nil, fmt.Errorf(i18n.T("トラストバンドルの自分のルート CA（%s）が、CAFile のルート CA に無い", "own root CA %s in the trust bundle is not among the root CAs in CAFile"), fp)
 		}
 	}
 	v := &Verified{Bundle: &b}
@@ -220,11 +221,11 @@ func checkPartner(p BundlePartner, o VerifyOptions, accepted [][]string) (Truste
 		return TrustedPartner{}, err.Error()
 	}
 	if !FingerprintEqual(p.RootSHA256, Fingerprint(root)) {
-		return TrustedPartner{}, "指紋がルート CA の証明書と一致しない"
+		return TrustedPartner{}, i18n.T("指紋がルート CA の証明書と一致しない", "the fingerprint does not match the root CA certificate")
 	}
 	for _, own := range o.OwnRoots {
 		if own.Equal(root) {
-			return TrustedPartner{}, "自分のルート CA と同じ"
+			return TrustedPartner{}, i18n.T("自分のルート CA と同じ", "same as your own root CA")
 		}
 	}
 	scope, err := NormalizeScope(p.Domains)
@@ -232,28 +233,28 @@ func checkPartner(p BundlePartner, o VerifyOptions, accepted [][]string) (Truste
 		return TrustedPartner{}, err.Error()
 	}
 	if ScopesOverlap(scope, o.OwnScope) {
-		return TrustedPartner{}, fmt.Sprintf("範囲 %v が自分の範囲 %v と重なる", scope, o.OwnScope)
+		return TrustedPartner{}, fmt.Sprintf(i18n.T("範囲 %v が自分の範囲 %v と重なる", "scope %v overlaps your own scope %v"), scope, o.OwnScope)
 	}
 	for _, other := range accepted {
 		if ScopesOverlap(scope, other) {
-			return TrustedPartner{}, fmt.Sprintf("範囲 %v が他の連携先の範囲 %v と重なる", scope, other)
+			return TrustedPartner{}, fmt.Sprintf(i18n.T("範囲 %v が他の連携先の範囲 %v と重なる", "scope %v overlaps another partner's scope %v"), scope, other)
 		}
 	}
 	if !p.Expires.IsZero() && !o.Now.Before(p.Expires) {
-		return TrustedPartner{}, "連携の有効期限が切れている"
+		return TrustedPartner{}, i18n.T("連携の有効期限が切れている", "the federation has expired")
 	}
 	roots := []*x509.Certificate{root}
 	if p.NextRootCert != "" {
 		next, err := parseRoot(p.NextRootCert)
 		if err != nil {
-			return TrustedPartner{}, "次のルート: " + err.Error()
+			return TrustedPartner{}, i18n.T("次のルート: ", "next root: ") + err.Error()
 		}
 		if !FingerprintEqual(p.NextRootSHA256, Fingerprint(next)) {
-			return TrustedPartner{}, "次のルートの指紋が証明書と一致しない"
+			return TrustedPartner{}, i18n.T("次のルートの指紋が証明書と一致しない", "the next root fingerprint does not match the certificate")
 		}
 		for _, own := range o.OwnRoots {
 			if own.Equal(next) {
-				return TrustedPartner{}, "次のルートが自分のルート CA と同じ"
+				return TrustedPartner{}, i18n.T("次のルートが自分のルート CA と同じ", "the next root is the same as your own root CA")
 			}
 		}
 		roots = append(roots, next)
@@ -287,7 +288,7 @@ func NewBuilder(store *Store, inter *x509.Certificate, key crypto.Signer, ownRoo
 		validity = DefaultBundleValidity
 	}
 	if validity < MinBundleValidity || validity > MaxBundleValidity {
-		return nil, fmt.Errorf("トラストバンドルの有効期限は %s〜%s", MinBundleValidity, MaxBundleValidity)
+		return nil, fmt.Errorf(i18n.T("トラストバンドルの有効期限は %s〜%s", "the trust bundle validity must be %s to %s"), MinBundleValidity, MaxBundleValidity)
 	}
 	if log == nil {
 		log = slog.Default()
@@ -320,7 +321,7 @@ func (b *Builder) OwnRoots() []*x509.Certificate { return slices.Clone(b.ownRoot
 func (b *Builder) Current(now time.Time) (string, string, error) {
 	f, changed, err := b.store.Snapshot()
 	if err != nil {
-		return "", "", fmt.Errorf("連携情報のファイルを読めない: %w", err)
+		return "", "", fmt.Errorf(i18n.T("連携情報のファイルを読めない: %w", "cannot read the federation file: %w"), err)
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -345,11 +346,11 @@ func (b *Builder) Current(now time.Time) (string, string, error) {
 			bp.NextRootCert, bp.NextRootSHA256 = p.NextRootCert, p.NextRootSHA256
 		}
 		if _, reason := checkPartner(bp, VerifyOptions{OwnRoots: b.ownRoots, OwnScope: b.ownScope, Now: now}, accepted); reason != "" {
-			b.log.Warn("連携先をトラストバンドルに入れない", "category", "audit", "partner", p.ID, "reason", reason)
+			b.log.Warn(i18n.T("連携先をトラストバンドルに入れない", "not including a partner in the trust bundle"), "category", "audit", "partner", p.ID, "reason", reason)
 			continue
 		}
 		if p.Expires.Sub(now) < 30*24*time.Hour {
-			b.log.Warn("連携の有効期限が近い（照合と承認をやり直す）", "partner", p.ID, "expires", p.Expires)
+			b.log.Warn(i18n.T("連携の有効期限が近い（照合と承認をやり直す）", "the federation expires soon (redo the comparison and approval)"), "partner", p.ID, "expires", p.Expires)
 		}
 		accepted = append(accepted, p.Domains)
 		bundle.Partners = append(bundle.Partners, bp)
@@ -360,7 +361,7 @@ func (b *Builder) Current(now time.Time) (string, string, error) {
 	}
 	sum := sha256.Sum256([]byte(compact))
 	b.seq, b.lastIssued, b.compact, b.etag = bundle.Seq, issued, compact, `"`+hex.EncodeToString(sum[:16])+`"`
-	b.log.Info("トラストバンドルを作った", "epoch", b.epoch, "seq", b.seq, "partners", len(bundle.Partners), "expires", bundle.Expires)
+	b.log.Info(i18n.T("トラストバンドルを作った", "built the trust bundle"), "epoch", b.epoch, "seq", b.seq, "partners", len(bundle.Partners), "expires", bundle.Expires)
 	return b.compact, b.etag, nil
 }
 
