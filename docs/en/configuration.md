@@ -19,6 +19,9 @@ The language of logs, errors, CLI output, ACME error details and the admin UI is
 An unrecognized value (e.g. `fr`) falls back to Japanese with a warning at startup. `mtls-ca`, `mtls-agent` and `mtlsctl` all follow the same rule.
 The admin UI is shown in the language `mtls-ca` was started with (the browser's language setting does not switch it, so that the UI matches the log and error messages).
 
+- **Monitoring logs**: the log message text (`msg`) changes with the language. Filter monitoring and alerts by attributes (such as `category=audit` or `serial=…`; keys and values do not depend on the language) rather than by message text, or review the conditions when you switch languages.
+- **The `mtls` library**: its error and log messages follow `MTLS_LANG` of the application process that embeds it.
+
 - **systemd**: run `sudo systemctl edit mtls-ca` (likewise for `mtls-agent`), add the following and restart.
 
   ```ini
