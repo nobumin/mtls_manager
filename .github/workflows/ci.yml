@@ -21,8 +21,8 @@ jobs:
     name: 書式・静的解析
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: stable
       - name: gofmt
@@ -43,8 +43,8 @@ jobs:
           - { os: macos-latest, go: stable }
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: ${{ matrix.go }}
       - run: go test -race -count=1 ./...
@@ -59,8 +59,8 @@ jobs:
     name: 相互接続試験（lego）
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: stable
       - name: lego をインストール
@@ -79,8 +79,8 @@ jobs:
         goarch: [amd64, arm64]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: stable
       - run: go build -trimpath -o dist/ ./cmd/...
@@ -93,8 +93,8 @@ jobs:
     name: 既知の脆弱性（govulncheck）
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: stable
       - run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
@@ -103,10 +103,10 @@ jobs:
     name: 秘密情報の混入検査（gitleaks）
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: stable
       - run: go install github.com/zricethezav/gitleaks/v8@v8.30.1
