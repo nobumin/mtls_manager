@@ -10,7 +10,6 @@ you need your own CA. mtls_manager aims to make in-house mTLS as easy to operate
 
 > **Status: v0.x (early development).** Interfaces may change. We recommend an independent security review
 > before broad production use (see [SECURITY.md](SECURITY.md)).
-> Log and CLI messages are currently in Japanese.
 
 ## Features
 
