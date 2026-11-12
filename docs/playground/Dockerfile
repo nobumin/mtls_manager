@@ -4,7 +4,7 @@
 #   target server-b … nginx ＋ mtls-agent
 # 体験用なので、どのコンテナも root で動かし、アプリと mtls-agent を同じコンテナで動かす（本番の構成ではない）。
 
-FROM golang:1.26-bookworm AS build
+FROM golang:1.27-bookworm AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download

@@ -44,12 +44,12 @@ Run everything as a user who can `sudo`. The working directory is `~/mtls-test`.
 | Item | Contents |
 | --- | --- |
 | OS | Linux with systemd (checked on Ubuntu 24.04) |
-| Go | 1.26 or later |
+| Go | 1.27.4 or later |
 | Packages | `git`, `curl`, `openssl`, `nginx` (used by the nginx items in 4.; not needed otherwise) |
 
 ```sh
 sudo apt-get install -y git curl openssl nginx    # Debian / Ubuntu
-go version                                        # must be go1.26 or later
+go version                                        # must be go1.27.4 or later
 ```
 
 > If proxy variables such as `HTTPS_PROXY` are set, curl sends the test names to the proxy.
