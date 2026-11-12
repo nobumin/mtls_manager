@@ -42,7 +42,7 @@ mtls_manager issues, distributes and renews the certificates automatically, and 
 
 | Item | Details |
 | --- | --- |
-| Docker | Docker Desktop (macOS, Windows) or Docker Engine (Linux), with `docker compose` (v2 or later) |
+| Docker | Docker Desktop (macOS, Windows) or Docker Engine (Linux), with `docker compose` (v2 or later). If you installed only the standalone `docker-compose` (v2 or later), e.g. with Homebrew, read `docker compose` in the steps as `docker-compose` (the scripts work with either) |
 | Shell | bash (as is on macOS and Linux; on Windows, run inside WSL2) |
 | Browser | To open the admin UI (Chrome, Edge, Firefox or Safari) |
 | Free port | `127.0.0.1:9443` on your PC (admin UI) |
@@ -291,6 +291,8 @@ To try again, start over from [1. Start](#1-start).
 
 | Symptom | What to do |
 | --- | --- |
+| `docker compose` fails with `unknown shorthand flag: 'd' in -d` or similar | The Compose plugin is not installed (`docker compose` is read as a command of Docker itself). Use `docker-compose` instead, or register it as a plugin. With Homebrew: `mkdir -p ~/.docker/cli-plugins`, then `ln -sfn "$(brew --prefix)/opt/docker-compose/bin/docker-compose" ~/.docker/cli-plugins/docker-compose`. Done when `docker compose version` prints the version |
+| A script stops with `Docker Compose (v2 or later) not found` | Neither `docker compose` nor `docker-compose` (v2 or later) is available. Install Docker Desktop or Compose v2 (and register it as a plugin as in the row above). `docker-compose` v1 (`1.x`) does not work |
 | `./setup.sh` stops with `… is not running` | Run `docker compose up -d --build` first, and check with `docker compose ps` that all three are `Up` |
 | `./setup.sh` stops with `already set up` | The setup runs only once. To start over, run `docker compose down -v`, then `docker compose up -d --build` and `./setup.sh` |
 | `./setup.sh` stops with `gave up waiting for …` | Look for errors with `docker compose logs mtls-manager server-a server-b` |
