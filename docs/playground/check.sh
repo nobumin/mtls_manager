@@ -15,12 +15,25 @@ pass=0 failed=0
 
 # t 日本語 English: MTLS_LANG が en（en_US.UTF-8 なども可）なら英語を、それ以外は日本語を出す（プログラムと同じ決め方）。
 t() { case "$(printf '%s' "${MTLS_LANG:-}" | tr 'A-Z' 'a-z')" in en | en[_.@-]*) printf '%s' "$2" ;; *) printf '%s' "$1" ;; esac; }
+fail() { printf "\033[31m%s\033[0m\n" "$*" >&2; exit 1; }
+
+# docker compose を使う。Compose のプラグイン（docker compose）が無ければ、単体の docker-compose（v2 以降）を使う
+# （Homebrew などで docker-compose だけを入れた macOS では、docker compose が使えない）。
+if docker compose version >/dev/null 2>&1; then
+  DC="docker compose"
+elif docker-compose version --short 2>/dev/null | grep -Eq '^v?([2-9]|[1-9][0-9])\.'; then
+  DC=docker-compose
+else
+  fail "$(t "Docker Compose（v2 以降）が見つからない。docker compose version で確かめる（README の「うまくいかないとき」を参照）" "Docker Compose (v2 or later) not found; check with docker compose version (see Troubleshooting in the README)")"
+fi
+# shellcheck disable=SC2086 # DC は "docker compose" のように 2 語になるので、分けて渡す
+dc() { $DC "$@"; }
 
 # check 説明 期待（ok: 成功して本文に文字列を含む / code:NNN: HTTP の状態コード / reject: TLS で拒否） 文字列 サービス curl の引数...
 check() {
   local title=$1 expect=$2 want=$3 svc=$4; shift 4
   local out rc code
-  out=$(docker compose exec -T "$svc" curl -sS -w '\n%{http_code}' "$@" 2>&1); rc=$?
+  out=$(dc exec -T "$svc" curl -sS -w '\n%{http_code}' "$@" 2>&1); rc=$?
   code=$(printf '%s' "$out" | tail -n 1)
   out=$(printf '%s' "$out" | sed '$d')
   local ok=false
@@ -63,6 +76,6 @@ echo
 if [ $failed -eq 0 ]; then
   printf "\033[32m$(t "%d 件すべて合格" "all %d passed")\033[0m\n" "$pass"
 else
-  printf "\033[31m$(t "%d 件中 %d 件が不合格" "%d checks, %d failed")\033[0m$(t "（docker compose logs で確かめる）" " (check with docker compose logs)")\n" "$((pass + failed))" "$failed"
+  printf "\033[31m$(t "%d 件中 %d 件が不合格" "%d checks, %d failed")\033[0m$(t "（$DC logs で確かめる）" " (check with $DC logs)")\n" "$((pass + failed))" "$failed"
   exit 1
 fi
