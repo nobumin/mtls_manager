@@ -14,7 +14,7 @@ and a server receiving a certificate, `web1.internal.example.com`. Adjust them t
 | CA server | A Linux server (macOS also works) running `mtls-ca` |
 | Servers | Machines that receive certificates. Their FQDNs must resolve in your internal DNS |
 | Network | Servers → CA server on port 8443 (ACME). CA server → servers on port 80 (http-01) or 443 (tls-alpn-01) |
-| Go | 1.26 or later (only on the machine where you build the binaries) |
+| Go | 1.27.4 or later (only on the machine where you build the binaries) |
 
 The CA server must also be able to resolve each server's FQDN (it connects to them for validation).
 
@@ -278,6 +278,7 @@ curl --cacert /etc/mtls-agent/tls/ca.pem \
 
 ## macOS
 
+- Requires macOS 13 Ventura or later (a requirement of binaries built with Go 1.27).
 - Put the configuration in e.g. `/usr/local/etc/mtls-agent/config.yaml` and run the agent with the plist in `deploy/launchd/`.
 
   ```sh

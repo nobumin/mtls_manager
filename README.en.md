@@ -58,7 +58,7 @@ you need your own CA. mtls_manager aims to make in-house mTLS as easy to operate
 
 ## Installation
 
-Requires Go 1.26 or later.
+Requires Go 1.27.4 or later (on macOS, macOS 13 Ventura or later, as required by Go 1.27).
 
 ```sh
 go install github.com/nobumin/mtls_manager/cmd/...@latest
