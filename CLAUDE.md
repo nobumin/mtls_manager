@@ -54,6 +54,15 @@
 - CI（`.github/workflows/ci.yml`）: 書式、staticcheck、Linux / macOS のテスト、lego との相互接続、クロスビルド、govulncheck、gitleaks。
   PR（develop / main 向けの作成・更新）のときだけ動く。新しい脆弱性は `.github/workflows/weekly.yml` で週 1 回確かめる。
 
+### Go のバージョンを上げるとき
+
+対応する最低のバージョンは `go.mod` の `go` の行が正。CI のテストは、この版（`min`）と最新の版（`stable`）の両方で動く。
+
+1. リリースノート（`https://go.dev/doc/go1.NN`）で、このリポジトリに関係する変更を確かめる。特に `crypto/tls`・`crypto/x509`・`encoding/json`、`GODEBUG` の設定（廃止されるものと、既定値が変わるもの。既定値は `go.mod` の `go` の行で決まるので、上げると効く）、対応する OS の版（macOS の最低の版など）。`GODEBUG` は、新しい版のソースの `src/internal/godebugs/table.go` で `Changed` / `Removed` がその版のものを見れば、リリースノートが見られなくても確かめられる。
+2. `go mod edit -go=1.NN.N && go mod tidy` で `go.mod` を上げる（CI の `min` も追従する）。
+3. 次の文書の版の記載を合わせる（日本語・英語の両方）: `README.md` / `README.en.md`（インストール）、`docs/*/getting-started.md`（必要なもの・macOS）、`docs/*/test-procedure.md`（必要なもの）、`docs/playground/Dockerfile`（`golang:1.NN-bookworm`）。
+4. 新しい版で `go test -race ./...`、`MTLS_LANG=en go test ./...`、`go vet ./...`、staticcheck、lego との相互接続試験を通す（`GOTOOLCHAIN=go1.NN.N` を付ければ、手元の Go のままで試せる。`go run …staticcheck@…` のようなツールの実行にも付ける。付けないと、ツール側の `go.mod` の版で動く）。staticcheck が新しい版に対応していなければ、`ci.yml` の版も上げる。
+
 ## 7. ドキュメント維持
 
 コードを変えたら、関係する次の文書を更新する（日本語・英語の両方）。

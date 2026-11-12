@@ -14,7 +14,7 @@ CA を構築し、2 台のサーバ間で mTLS の接続ができるところま
 | CA サーバ | `mtls-ca` を動かす Linux サーバ（macOS も可） |
 | 各サーバ | 証明書を受け取るサーバ。社内 DNS で FQDN を引けること |
 | 通信 | 各サーバ → CA サーバの 8443 番（ACME）。CA サーバ → 各サーバの 80 番（http-01）または 443 番（tls-alpn-01） |
-| Go | 1.26 以降（バイナリをビルドする端末だけでよい） |
+| Go | 1.27.4 以降（バイナリをビルドする端末だけでよい） |
 
 CA サーバからも各サーバの FQDN を名前解決できる必要があります（所有確認で接続するため）。
 
@@ -276,6 +276,7 @@ curl --cacert /etc/mtls-agent/tls/ca.pem \
 
 ## macOS で使う場合
 
+- macOS 13 Ventura 以降が必要です（Go 1.27 でビルドしたバイナリの要件）。
 - 設定ファイルは `/usr/local/etc/mtls-agent/config.yaml` などに置き、`deploy/launchd/` の plist で常駐させます。
 
   ```sh

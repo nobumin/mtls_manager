@@ -58,7 +58,7 @@ Let's Encrypt はクライアント認証用の証明書の発行を 2026 年に
 
 ## インストール
 
-Go 1.26 以降が必要です。
+Go 1.27.4 以降が必要です（macOS は 13 Ventura 以降。Go 1.27 の要件）。
 
 ```sh
 go install github.com/nobumin/mtls_manager/cmd/...@latest

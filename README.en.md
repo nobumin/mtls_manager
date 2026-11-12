@@ -10,7 +10,6 @@ you need your own CA. mtls_manager aims to make in-house mTLS as easy to operate
 
 > **Status: v0.x (early development).** Interfaces may change. We recommend an independent security review
 > before broad production use (see [SECURITY.md](SECURITY.md)).
-> Log and CLI messages are currently in Japanese.
 
 ## Features
 
@@ -58,7 +57,7 @@ you need your own CA. mtls_manager aims to make in-house mTLS as easy to operate
 
 ## Installation
 
-Requires Go 1.26 or later.
+Requires Go 1.27.4 or later (on macOS, macOS 13 Ventura or later, as required by Go 1.27).
 
 ```sh
 go install github.com/nobumin/mtls_manager/cmd/...@latest

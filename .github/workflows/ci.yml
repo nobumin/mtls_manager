@@ -38,7 +38,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-latest, go: oldstable }
+          # min: go.mod の go の行（対応する最低のバージョン）。Go を上げるときは go.mod だけを直せば、ここも追従する
+          - { os: ubuntu-latest, go: min }
           - { os: ubuntu-latest, go: stable }
           - { os: macos-latest, go: stable }
     runs-on: ${{ matrix.os }}
@@ -46,7 +47,8 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
-          go-version: ${{ matrix.go }}
+          go-version: ${{ matrix.go != 'min' && matrix.go || '' }}
+          go-version-file: ${{ matrix.go == 'min' && 'go.mod' || '' }}
       - run: go test -race -count=1 ./...
       # 開発者のシェルで MTLS_LANG=en を設定していても、テストが通ること（テストは日本語の文言を照合するので、TestMain で日本語に固定している）
       - name: MTLS_LANG=en でもテストが通る

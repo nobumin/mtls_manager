@@ -43,12 +43,12 @@
 | 項目 | 内容 |
 | --- | --- |
 | OS | systemd の Linux（Ubuntu 24.04 で確認） |
-| Go | 1.26 以降 |
+| Go | 1.27.4 以降 |
 | パッケージ | `git`、`curl`、`openssl`、`nginx`（4. の nginx の項目で使う。使わない場合は不要） |
 
 ```sh
 sudo apt-get install -y git curl openssl nginx    # Debian / Ubuntu の場合
-go version                                        # go1.26 以降であること
+go version                                        # go1.27.4 以降であること
 ```
 
 > `HTTPS_PROXY` などのプロキシの環境変数を設定している場合、curl がテスト用の名前をプロキシへ送ってしまいます。
