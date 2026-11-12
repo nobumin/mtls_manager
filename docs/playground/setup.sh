@@ -12,13 +12,24 @@ CA_HOST=ca.$DOMAIN
 ADMIN=admin.admins.$DOMAIN
 P12_PASS=playground
 
-dc() { docker compose "$@"; }
 m() { dc exec -T mtls-manager "$@"; }
 step() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
 fail() { printf '\033[31m%s\033[0m\n' "$*" >&2; exit 1; }
 
 # t 日本語 English: MTLS_LANG が en（en_US.UTF-8 なども可）なら英語を、それ以外は日本語を出す（プログラムと同じ決め方）。
 t() { case "$(printf '%s' "${MTLS_LANG:-}" | tr 'A-Z' 'a-z')" in en | en[_.@-]*) printf '%s' "$2" ;; *) printf '%s' "$1" ;; esac; }
+
+# docker compose を使う。Compose のプラグイン（docker compose）が無ければ、単体の docker-compose（v2 以降）を使う
+# （Homebrew などで docker-compose だけを入れた macOS では、docker compose が使えない）。
+if docker compose version >/dev/null 2>&1; then
+  DC="docker compose"
+elif docker-compose version --short 2>/dev/null | grep -Eq '^v?([2-9]|[1-9][0-9])\.'; then
+  DC=docker-compose
+else
+  fail "$(t "Docker Compose（v2 以降）が見つからない。docker compose version で確かめる（README の「うまくいかないとき」を参照）" "Docker Compose (v2 or later) not found; check with docker compose version (see Troubleshooting in the README)")"
+fi
+# shellcheck disable=SC2086 # DC は "docker compose" のように 2 語になるので、分けて渡す
+dc() { $DC "$@"; }
 
 # put SERVICE PATH MODE: 標準入力の内容を、コンテナの中のファイルに書く
 put() { dc exec -T "$1" sh -c "umask 077; cat > '$2' && chmod $3 '$2'"; }
@@ -30,14 +41,14 @@ wait_for() {
     if "$@" >/dev/null 2>&1; then return 0; fi
     sleep 1
   done
-  fail "$(t "$what を待ったが、${secs} 秒たっても終わらない（docker compose logs で確かめる）" "gave up waiting for $what after ${secs} seconds (check with docker compose logs)")"
+  fail "$(t "$what を待ったが、${secs} 秒たっても終わらない（$DC logs で確かめる）" "gave up waiting for $what after ${secs} seconds (check with $DC logs)")"
 }
 
 for s in mtls-manager server-a server-b; do
-  [ -n "$(dc ps -q --status running "$s")" ] || fail "$(t "$s が動いていない。先に docker compose up -d --build を実行する" "$s is not running; run docker compose up -d --build first")"
+  [ -n "$(dc ps -q --status running "$s")" ] || fail "$(t "$s が動いていない。先に $DC up -d --build を実行する" "$s is not running; run $DC up -d --build first")"
 done
 if m test -f /etc/mtls-ca/config.yaml; then
-  fail "$(t "すでに設定済み。やり直すときは docker compose down -v で消してから、docker compose up -d --build と setup.sh を実行する" "already set up; to start over, remove everything with docker compose down -v, then run docker compose up -d --build and setup.sh")"
+  fail "$(t "すでに設定済み。やり直すときは $DC down -v で消してから、$DC up -d --build と setup.sh を実行する" "already set up; to start over, remove everything with $DC down -v, then run $DC up -d --build and setup.sh")"
 fi
 
 step "$(t "1/5 ルート CA と中間 CA を作る（名前制約: $DOMAIN）" "1/5 Create the root CA and the intermediate CA (name constraint: $DOMAIN)")"

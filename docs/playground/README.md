@@ -41,7 +41,7 @@ Docker だけで、**プライベートネットワークの 2 台のサーバ�
 
 | 項目 | 内容 |
 | --- | --- |
-| Docker | Docker Desktop（macOS・Windows）または Docker Engine（Linux）。`docker compose`（v2 以降）が使えること |
+| Docker | Docker Desktop（macOS・Windows）または Docker Engine（Linux）。`docker compose`（v2 以降）が使えること。Homebrew などで単体の `docker-compose`（v2 以降）だけを入れた環境では、手順の `docker compose` を `docker-compose` に読み替える（スクリプトはどちらでも動く） |
 | シェル | bash（macOS・Linux はそのまま。Windows は WSL2 の中で実行する） |
 | ブラウザ | 管理画面を開くのに使う（Chrome・Edge・Firefox・Safari） |
 | 空いているポート | PC の `127.0.0.1:9443`（管理画面） |
@@ -281,6 +281,8 @@ rm -f out/admin.p12 out/admin.crt out/admin.key out/root.crt
 
 | 症状 | 対処 |
 | --- | --- |
+| `docker compose` が `unknown shorthand flag: 'd' in -d` などで失敗する | Compose のプラグインが入っていない（`docker compose` が Docker 本体のコマンドとして解釈されている）。`docker-compose` で読み替えるか、プラグインとして登録する。Homebrew の場合: `mkdir -p ~/.docker/cli-plugins` の後、`ln -sfn "$(brew --prefix)/opt/docker-compose/bin/docker-compose" ~/.docker/cli-plugins/docker-compose`。`docker compose version` が表示されれば完了 |
+| スクリプトが `Docker Compose（v2 以降）が見つからない` で止まる | `docker compose` も `docker-compose`（v2 以降）も使えない。Docker Desktop を入れるか、Compose v2 を入れる（上の行のとおりプラグインとして登録する）。`docker-compose` の v1（`1.x`）は使えない |
 | `./setup.sh` が `… が動いていない` で止まる | `docker compose up -d --build` を先に実行する。`docker compose ps` で 3 台が `Up` か確かめる |
 | `./setup.sh` が `すでに設定済み` で止まる | 初期設定は 1 回だけ。やり直すときは `docker compose down -v` の後、`docker compose up -d --build` と `./setup.sh` を実行する |
 | `./setup.sh` が `… を待ったが、… 秒たっても終わらない` で止まる | `docker compose logs mtls-manager server-a server-b` でエラーを確かめる |
